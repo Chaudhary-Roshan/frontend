@@ -429,7 +429,10 @@ const PresidentDashboard = () => {
       }
       if (propRes.status === 'fulfilled') setProposals(propRes.value.data);
       if (venRes.status === 'fulfilled') setVenues(venRes.value.data);
-      if (staffRes.status === 'fulfilled') setStaffAssignments(staffRes.value.data || []);
+      if (staffRes.status === 'fulfilled') {
+        const staffList = Array.isArray(staffRes.value.data) ? staffRes.value.data : [];
+        setStaffAssignments(staffList.filter(s => s.status !== 'revoked'));
+      }
       if (certTmplRes.status === 'fulfilled') setCertificateTemplates(certTmplRes.value.data || []);
       if (volHourRes.status === 'fulfilled') setVolunteerHours(volHourRes.value.data || []);
       if (regRes.status === 'fulfilled') setRegistrations(regRes.value.data || []);
@@ -763,7 +766,7 @@ const PresidentDashboard = () => {
     if (!window.confirm("Revoke this gate volunteer duty assignment?")) return;
     try {
       await api.post(`staff-assignments/${id}/revoke/`);
-      setStaffAssignments(staffAssignments.filter(s => s.id !== id));
+      setStaffAssignments(prev => prev.filter(s => String(s.id) !== String(id)));
       showToast("Volunteer duty revoked.");
     } catch (err) {
       alert("Failed to revoke duty.");
@@ -2199,69 +2202,76 @@ const PresidentDashboard = () => {
               </div>
 
               {/* Roster of Appointed Gate Volunteers */}
-              {staffAssignments.length === 0 ? (
-                <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                  <QrCode className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                  <p className="text-sm font-bold text-slate-700">No gate check-in volunteers appointed yet</p>
-                  <p className="text-xs text-slate-400 mt-1">Click "Appoint Gate Volunteer" to designate student officers for high-volume entry lanes.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {staffAssignments.map((duty) => (
-                    <div key={duty.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col justify-between space-y-3 hover:border-orange-300 transition">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-700 font-black text-sm flex items-center justify-center shrink-0">
-                            {(duty.volunteer_name || duty.volunteer_username || 'V')[0].toUpperCase()}
-                          </div>
-                          <div className="min-w-0">
-                            <h4 className="text-xs font-black text-slate-900 truncate">
-                              {duty.volunteer_name || duty.volunteer_username}
-                            </h4>
-                            <span className="text-[11px] font-mono text-slate-500 font-bold block truncate">
-                              Roll: {duty.volunteer_roll || 'N/A'}
-                            </span>
-                          </div>
-                        </div>
-                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200 shrink-0">
-                          {duty.status}
-                        </span>
-                      </div>
-
-                      <div className="p-2.5 bg-white border border-slate-200/80 rounded-xl space-y-1">
-                        <div className="flex items-center justify-between text-[11px]">
-                          <span className="font-bold text-slate-600">Gate / Station:</span>
-                          <span className="font-bold text-orange-600 font-mono">{duty.gate_name || 'Gate 1'}</span>
-                        </div>
-                        <div className="text-[11px] text-slate-600 truncate">
-                          <span className="font-bold">Event: </span>{duty.event_title || `Event #${duty.event}`}
-                        </div>
-                        {duty.duty_start && (
-                          <div className="text-[10px] text-slate-400">
-                            Window: {new Date(duty.duty_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {duty.duty_end ? new Date(duty.duty_end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'End of Event'}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex items-center justify-between pt-1">
-                        <Link
-                          to={`/attendance?event=${duty.event}`}
-                          className="text-[11px] font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1"
-                        >
-                          <QrCode size={13} /> Launch Duty Lane &rarr;
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => handleRevokeVolunteer(duty.id)}
-                          className="text-[11px] font-bold text-rose-600 hover:text-rose-700 p-1 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                        >
-                          Revoke
-                        </button>
-                      </div>
+              {(() => {
+                const activeVolunteers = staffAssignments.filter(s => s.status !== 'revoked' && s.status !== 'cancelled');
+                if (activeVolunteers.length === 0) {
+                  return (
+                    <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                      <QrCode className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                      <p className="text-sm font-bold text-slate-700">No gate check-in volunteers appointed yet</p>
+                      <p className="text-xs text-slate-400 mt-1">Click "Appoint Gate Volunteer" to designate student officers for high-volume entry lanes.</p>
                     </div>
-                  ))}
-                </div>
-              )}
+                  );
+                }
+
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {activeVolunteers.map((duty) => (
+                      <div key={duty.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col justify-between space-y-3 hover:border-orange-300 transition">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-700 font-black text-sm flex items-center justify-center shrink-0">
+                              {(duty.volunteer_name || duty.volunteer_username || 'V')[0].toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <h4 className="text-xs font-black text-slate-900 truncate">
+                                {duty.volunteer_name || duty.volunteer_username}
+                              </h4>
+                              <span className="text-[11px] font-mono text-slate-500 font-bold block truncate">
+                                Roll: {duty.volunteer_roll || 'N/A'}
+                              </span>
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200 shrink-0">
+                            {duty.status}
+                          </span>
+                        </div>
+
+                        <div className="p-2.5 bg-white border border-slate-200/80 rounded-xl space-y-1">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-bold text-slate-600">Gate / Station:</span>
+                            <span className="font-bold text-orange-600 font-mono">{duty.gate_name || 'Gate 1'}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-600 truncate">
+                            <span className="font-bold">Event: </span>{duty.event_title || `Event #${duty.event}`}
+                          </div>
+                          {duty.duty_start && (
+                            <div className="text-[10px] text-slate-400">
+                              Window: {new Date(duty.duty_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {duty.duty_end ? new Date(duty.duty_end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'End of Event'}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1">
+                          <Link
+                            to={`/attendance?event=${duty.event}`}
+                            className="text-[11px] font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1"
+                          >
+                            <QrCode size={13} /> Launch Duty Lane &rarr;
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => handleRevokeVolunteer(duty.id)}
+                            className="text-[11px] font-bold text-rose-600 hover:text-rose-700 p-1 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                          >
+                            Revoke
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* 6.1 EVENT VOLUNTEER ROSTER & SERVICE HOURS */}
