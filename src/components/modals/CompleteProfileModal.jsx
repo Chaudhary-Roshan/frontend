@@ -48,6 +48,7 @@ const CompleteProfileModal = ({ profile, onClose, onProfileUpdated }) => {
     cnic: profile?.cnic || '',
     avatar_url: profile?.avatar_url || '',
     department: profile?.department || '',
+    faculty_name: profile?.faculty_name || '',
     program: profile?.program || '',
     batch: profile?.batch || '',
     semester: profile?.semester || '',
@@ -143,6 +144,7 @@ const CompleteProfileModal = ({ profile, onClose, onProfileUpdated }) => {
         avatar_url: form.avatar_url,
         profile_photo_url: form.avatar_url,
         department: form.department,
+        faculty_name: form.faculty_name,
         program: form.program,
         batch: form.batch,
         semester: form.semester,
@@ -364,6 +366,8 @@ const CompleteProfileModal = ({ profile, onClose, onProfileUpdated }) => {
               {step === 2 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                   <AcademicCombobox
+                    selectedFaculty={form.faculty_name}
+                    onFacultyChange={(fac) => setForm(prev => ({ ...prev, faculty_name: fac }))}
                     selectedDepartment={form.department}
                     onDepartmentChange={(dept) => setForm(prev => ({ ...prev, department: dept }))}
                     selectedProgram={form.program}

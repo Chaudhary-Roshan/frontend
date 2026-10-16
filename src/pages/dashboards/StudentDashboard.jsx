@@ -20,6 +20,18 @@ import CompleteProfileModal from '../../components/modals/CompleteProfileModal';
 import ImageUploader from '../../components/common/ImageUploader';
 import StudentDigitalWallet from '../../components/membership/StudentDigitalWallet';
 import { getMediaUrl, handleImageError } from '../../utils/media';
+import { 
+  FACULTIES, 
+  DEPARTMENTS, 
+  FACULTY_CATALOG, 
+  ACADEMIC_CATALOG, 
+  getDepartmentsForFaculty, 
+  getProgramsForDepartment, 
+  getProgramsForFaculty, 
+  getAllPrograms,
+  findDepartmentAndFacultyForProgram, 
+  findFacultyForDepartment 
+} from '../../utils/academicCatalog';
 
 const TicketCard = ({ selectedTicket, type, userAvatar, defaultAvatar, displayName, profile }) => {
   const isExpired = Boolean(selectedTicket?.is_expired || (selectedTicket?.event_date && new Date(selectedTicket.event_date) < new Date()));
@@ -346,6 +358,19 @@ const StudentDashboard = () => {
 
   const handleOpenEditProfile = () => {
     if (profile) {
+      let resolvedDept = profile.department || '';
+      let resolvedFaculty = profile.faculty_name || '';
+      if (profile.program && (!resolvedDept || !resolvedFaculty)) {
+        const resolved = findDepartmentAndFacultyForProgram(profile.program);
+        if (resolved) {
+          if (!resolvedDept) resolvedDept = resolved.department;
+          if (!resolvedFaculty) resolvedFaculty = resolved.faculty;
+        }
+      }
+      if (!resolvedFaculty && resolvedDept) {
+        resolvedFaculty = findFacultyForDepartment(resolvedDept) || '';
+      }
+
       setEditForm({
         first_name: profile.first_name || '',
         last_name: profile.last_name || '',
@@ -353,14 +378,89 @@ const StudentDashboard = () => {
         email: profile.email || '',
         roll_number: profile.roll_number || '',
         program: profile.program || '',
-        department: profile.department || '',
-        faculty_name: profile.faculty_name || '',
+        department: resolvedDept,
+        faculty_name: resolvedFaculty,
         phone_number: profile.phone_number || '',
         gender: profile.gender || '',
         avatar_url: profile.avatar_url || profile.profile_photo_url || ''
       });
     }
     setShowEditProfileModal(true);
+  };
+
+  // Available departments based on selected faculty in profile edit
+  const availableEditDepartments = React.useMemo(() => {
+    if (editForm.faculty_name && FACULTY_CATALOG[editForm.faculty_name]) {
+      return Object.keys(FACULTY_CATALOG[editForm.faculty_name]);
+    }
+    return DEPARTMENTS;
+  }, [editForm.faculty_name]);
+
+  // Available programs based on selected department or faculty in profile edit
+  const availableEditPrograms = React.useMemo(() => {
+    if (editForm.department && ACADEMIC_CATALOG[editForm.department]) {
+      return ACADEMIC_CATALOG[editForm.department];
+    }
+    if (editForm.faculty_name && FACULTY_CATALOG[editForm.faculty_name]) {
+      return getProgramsForFaculty(editForm.faculty_name);
+    }
+    return getAllPrograms();
+  }, [editForm.department, editForm.faculty_name]);
+
+  // If faculty is selected first, narrow departments without auto-selecting department or program
+  const handleEditFacultyChange = (newFaculty) => {
+    if (!newFaculty) {
+      setEditForm(prev => ({ ...prev, faculty_name: '' }));
+      return;
+    }
+    const deptsInFaculty = getDepartmentsForFaculty(newFaculty);
+    const keepDept = deptsInFaculty.includes(editForm.department);
+    const progsInFaculty = getProgramsForFaculty(newFaculty);
+    const keepProg = keepDept && progsInFaculty.includes(editForm.program);
+
+    setEditForm(prev => ({
+      ...prev,
+      faculty_name: newFaculty,
+      department: keepDept ? prev.department : '',
+      program: keepProg ? prev.program : ''
+    }));
+  };
+
+  // If department is selected, auto-align faculty and narrow programs
+  const handleEditDepartmentChange = (newDept) => {
+    if (!newDept) {
+      setEditForm(prev => ({ ...prev, department: '', program: '' }));
+      return;
+    }
+    const parentFaculty = findFacultyForDepartment(newDept);
+    const progsInDept = getProgramsForDepartment(newDept);
+    const keepProg = progsInDept.includes(editForm.program);
+
+    setEditForm(prev => ({
+      ...prev,
+      department: newDept,
+      faculty_name: parentFaculty || prev.faculty_name,
+      program: keepProg ? prev.program : ''
+    }));
+  };
+
+  // If program is selected, AUTOMATICALLY select its Department and Faculty!
+  const handleEditProgramChange = (newProg) => {
+    if (!newProg) {
+      setEditForm(prev => ({ ...prev, program: '' }));
+      return;
+    }
+    const resolved = findDepartmentAndFacultyForProgram(newProg);
+    if (resolved) {
+      setEditForm(prev => ({
+        ...prev,
+        program: resolved.program || newProg,
+        department: resolved.department,
+        faculty_name: resolved.faculty
+      }));
+    } else {
+      setEditForm(prev => ({ ...prev, program: newProg }));
+    }
   };
 
   const handleUpdateProfile = async (e) => {
@@ -1601,49 +1701,84 @@ const StudentDashboard = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">Roll / Student Number</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. FA22-BCS-042"
-                    value={editForm.roll_number}
-                    onChange={e => setEditForm({...editForm, roll_number: e.target.value})}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">Degree Program</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. BS Computer Science"
-                    value={editForm.program}
-                    onChange={e => setEditForm({...editForm, program: e.target.value})}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
-                  />
-                </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">Roll / Student Number</label>
+                <input
+                  type="text"
+                  placeholder="e.g. FA22-BCS-042"
+                  value={editForm.roll_number}
+                  onChange={e => setEditForm({...editForm, roll_number: e.target.value})}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold"
+                />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">Department</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Department of Computer Science"
-                    value={editForm.department}
-                    onChange={e => setEditForm({...editForm, department: e.target.value})}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
-                  />
+              {/* Linked Academic Affiliation Dropdowns */}
+              <div className="p-3.5 bg-indigo-50/60 border border-indigo-100 rounded-2xl space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-indigo-950 flex items-center gap-1.5">
+                    <GraduationCap size={15} className="text-indigo-600" /> Academic Affiliation
+                  </span>
+                  <span className="text-[10px] text-indigo-600 font-medium">
+                    Selecting a program auto-selects department & faculty
+                  </span>
                 </div>
+
+                {/* Degree Program Dropdown */}
                 <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">Faculty Division</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Faculty of Computing & Information Technology"
-                    value={editForm.faculty_name}
-                    onChange={e => setEditForm({...editForm, faculty_name: e.target.value})}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
-                  />
+                  <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
+                    Degree Program <span className="text-indigo-600 font-normal lowercase">(Selecting auto-fills department & faculty)</span>
+                  </label>
+                  <select
+                    value={editForm.program}
+                    onChange={e => handleEditProgramChange(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-white border border-indigo-200 hover:border-indigo-300 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition cursor-pointer"
+                  >
+                    <option value="">-- Select Degree Program --</option>
+                    {editForm.program && !availableEditPrograms.includes(editForm.program) && (
+                      <option value={editForm.program}>{editForm.program} (Current)</option>
+                    )}
+                    {availableEditPrograms.map((prog) => (
+                      <option key={prog} value={prog}>{prog}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Faculty & Department Dropdowns */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
+                      Faculty Division
+                    </label>
+                    <select
+                      value={editForm.faculty_name}
+                      onChange={e => handleEditFacultyChange(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-white border border-slate-200 hover:border-slate-300 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition cursor-pointer"
+                    >
+                      <option value="">-- Select Faculty (Filters Below) --</option>
+                      {FACULTIES.map((fac) => (
+                        <option key={fac} value={fac}>{fac}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
+                      Department
+                    </label>
+                    <select
+                      value={editForm.department}
+                      onChange={e => handleEditDepartmentChange(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-white border border-slate-200 hover:border-slate-300 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition cursor-pointer"
+                    >
+                      <option value="">-- Select Department --</option>
+                      {editForm.department && !availableEditDepartments.includes(editForm.department) && (
+                        <option value={editForm.department}>{editForm.department} (Current)</option>
+                      )}
+                      {availableEditDepartments.map((dept) => (
+                        <option key={dept} value={dept}>{dept}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 

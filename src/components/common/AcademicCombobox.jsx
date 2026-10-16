@@ -7,7 +7,9 @@ import {
   FACULTY_CATALOG, 
   FACULTIES, 
   ACADEMIC_CATALOG, 
-  DEPARTMENTS 
+  DEPARTMENTS,
+  findDepartmentAndFacultyForProgram,
+  findFacultyForDepartment
 } from '../../utils/academicCatalog';
 
 /**
@@ -16,6 +18,8 @@ import {
  * Tailored for dark glassmorphism registration/profile forms.
  */
 export default function AcademicCombobox({
+  selectedFaculty = '',
+  onFacultyChange,
   selectedDepartment = '',
   onDepartmentChange,
   selectedProgram = '',
@@ -30,7 +34,13 @@ export default function AcademicCombobox({
   const [isProgOpen, setIsProgOpen] = useState(false);
   const [deptSearch, setDeptSearch] = useState('');
   const [progSearch, setProgSearch] = useState('');
-  const [facultyFilter, setFacultyFilter] = useState('all');
+  const [facultyFilter, setFacultyFilter] = useState(selectedFaculty || 'all');
+
+  useEffect(() => {
+    if (selectedFaculty) {
+      setFacultyFilter(selectedFaculty);
+    }
+  }, [selectedFaculty]);
 
   const deptRef = useRef(null);
   const progRef = useRef(null);
@@ -120,10 +130,25 @@ export default function AcademicCombobox({
     return availablePrograms.filter(prog => prog.toLowerCase().includes(query));
   }, [progSearch, availablePrograms]);
 
+  const handleFacultyFilterChange = (newFac) => {
+    setFacultyFilter(newFac);
+    if (newFac && newFac !== 'all') {
+      onFacultyChange?.(newFac);
+    } else {
+      onFacultyChange?.('');
+    }
+  };
+
   const handleSelectDepartment = (dept) => {
     onDepartmentChange?.(dept);
     setIsDeptOpen(false);
     setDeptSearch('');
+
+    const parentFaculty = findFacultyForDepartment(dept) || deptToFacultyMap[dept];
+    if (parentFaculty) {
+      setFacultyFilter(parentFaculty);
+      onFacultyChange?.(parentFaculty);
+    }
 
     // If current program does not belong to the selected department, switch to the first program or clear
     const deptPrograms = ACADEMIC_CATALOG[dept] || [];
@@ -139,10 +164,26 @@ export default function AcademicCombobox({
     setIsProgOpen(false);
     setProgSearch('');
 
-    // If no department was selected, or selected department doesn't match this program, auto-set department
-    const parentDept = progToDeptMap[prog];
-    if (parentDept && parentDept !== selectedDepartment) {
-      onDepartmentChange?.(parentDept);
+    // If program is selected, auto-resolve both Department and Faculty!
+    const resolved = findDepartmentAndFacultyForProgram(prog);
+    if (resolved) {
+      if (resolved.department && resolved.department !== selectedDepartment) {
+        onDepartmentChange?.(resolved.department);
+      }
+      if (resolved.faculty) {
+        setFacultyFilter(resolved.faculty);
+        onFacultyChange?.(resolved.faculty);
+      }
+    } else {
+      const parentDept = progToDeptMap[prog];
+      if (parentDept && parentDept !== selectedDepartment) {
+        onDepartmentChange?.(parentDept);
+        const parentFac = deptToFacultyMap[parentDept];
+        if (parentFac) {
+          setFacultyFilter(parentFac);
+          onFacultyChange?.(parentFac);
+        }
+      }
     }
   };
 
@@ -304,7 +345,7 @@ export default function AcademicCombobox({
                 <Layers size={12} style={{ color: '#818cf8', shrink: 0 }} />
                 <select
                   value={facultyFilter}
-                  onChange={e => setFacultyFilter(e.target.value)}
+                  onChange={e => handleFacultyFilterChange(e.target.value)}
                   style={{
                     width: '100%',
                     background: 'rgba(15,23,42,0.9)',

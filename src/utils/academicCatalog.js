@@ -599,6 +599,83 @@ export const getProgramsForDepartment = (deptName) => {
   return ACADEMIC_CATALOG[deptName] || [];
 };
 
+export const getProgramsForFaculty = (facultyName) => {
+  if (!facultyName || !FACULTY_CATALOG[facultyName]) return [];
+  const progs = [];
+  Object.values(FACULTY_CATALOG[facultyName]).forEach(list => progs.push(...list));
+  return Array.from(new Set(progs));
+};
+
+export const findDepartmentAndFacultyForProgram = (programName) => {
+  if (!programName || typeof programName !== 'string') return null;
+  const rawTarget = programName.trim().toLowerCase();
+  if (!rawTarget) return null;
+
+  // 1. Exact match
+  for (const [faculty, depts] of Object.entries(FACULTY_CATALOG)) {
+    for (const [dept, progs] of Object.entries(depts)) {
+      const matched = progs.find(p => p.trim().toLowerCase() === rawTarget);
+      if (matched) {
+        return { faculty, department: dept, program: matched };
+      }
+    }
+  }
+
+  // 2. Normalized match (clean degree prefixes like BS, MS, PhD)
+  const clean = (s) => s.replace(/^(bs|b\.sc\.|m\.phil|ms|ph\.d|diploma in)\s+/i, '').replace(/[^a-z0-9]/g, '');
+  const cleanTarget = clean(rawTarget);
+  if (cleanTarget.length >= 4) {
+    for (const [faculty, depts] of Object.entries(FACULTY_CATALOG)) {
+      for (const [dept, progs] of Object.entries(depts)) {
+        for (const p of progs) {
+          if (clean(p.toLowerCase()) === cleanTarget) {
+            return { faculty, department: dept, program: p };
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Substring inclusion
+  for (const [faculty, depts] of Object.entries(FACULTY_CATALOG)) {
+    for (const [dept, progs] of Object.entries(depts)) {
+      for (const p of progs) {
+        const pLower = p.trim().toLowerCase();
+        if (pLower.includes(rawTarget) || rawTarget.includes(pLower)) {
+          return { faculty, department: dept, program: p };
+        }
+      }
+    }
+  }
+
+  return null;
+};
+
+export const findFacultyForDepartment = (deptName) => {
+  if (!deptName || typeof deptName !== 'string') return null;
+  const rawTarget = deptName.trim().toLowerCase();
+  if (!rawTarget) return null;
+
+  for (const [faculty, depts] of Object.entries(FACULTY_CATALOG)) {
+    for (const dept of Object.keys(depts)) {
+      if (dept.trim().toLowerCase() === rawTarget) {
+        return faculty;
+      }
+    }
+  }
+
+  for (const [faculty, depts] of Object.entries(FACULTY_CATALOG)) {
+    for (const dept of Object.keys(depts)) {
+      const dLower = dept.trim().toLowerCase();
+      if (dLower.includes(rawTarget) || rawTarget.includes(dLower)) {
+        return faculty;
+      }
+    }
+  }
+
+  return null;
+};
+
 export const getAllPrograms = () => {
   const all = [];
   Object.values(ACADEMIC_CATALOG).forEach(progs => all.push(...progs));
