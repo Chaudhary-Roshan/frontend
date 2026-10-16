@@ -348,6 +348,7 @@ export function generateOfficialTranscriptPDF(transcriptData, filename) {
   const {
     studentName = 'Student',
     rollNumber = 'N/A',
+    facultyName = '',
     departmentName = 'Department of Information and Communication Engineering',
     programName = 'BS Cyber Security and Digital Forensics',
     academicYear = '2023-2027',
@@ -393,7 +394,19 @@ export function generateOfficialTranscriptPDF(transcriptData, filename) {
   doc.text('OFFICIAL CO-CURRICULAR TRANSCRIPT', pageWidth / 2, cursorY + 4.8, { align: 'center' });
   cursorY += 10.5;
 
-  // --- 2. STUDENT IDENTIFICATION PROFILE ---
+  // --- 2. STUDENT IDENTIFICATION PROFILE (Hierarchical Academic Affiliation) ---
+  const bioRows = [
+    ['Student Full Name:', studentName, 'Roll Number / Reg:', rollNumber]
+  ];
+
+  if (facultyName) {
+    bioRows.push(['1. Faculty Division:', facultyName, '2. Department:', departmentName]);
+    bioRows.push(['3. Degree Program:', programName, 'Session / Issuance:', `${academicYear} • ${issuanceDate}`]);
+  } else {
+    bioRows.push(['Academic Department:', departmentName, 'Degree Program:', programName]);
+    bioRows.push(['Academic Session / Batch:', academicYear, 'Date of Issuance:', issuanceDate]);
+  }
+
   autoTable(doc, {
     startY: cursorY,
     margin: { left: margin, right: margin },
@@ -405,11 +418,7 @@ export function generateOfficialTranscriptPDF(transcriptData, filename) {
       2: { fontStyle: 'bold', textColor: COLORS.slateDark, width: 34, fillColor: [248, 250, 252] },
       3: { textColor: COLORS.textDark, width: 58 }
     },
-    body: [
-      ['Student Full Name:', studentName, 'Roll Number / Reg:', rollNumber],
-      ['Academic Department:', departmentName, 'Degree Program:', programName],
-      ['Academic Session / Batch:', academicYear, 'Date of Issuance:', issuanceDate]
-    ]
+    body: bioRows
   });
 
   cursorY = doc.lastAutoTable.finalY + 4;

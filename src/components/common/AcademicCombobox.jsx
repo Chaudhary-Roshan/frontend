@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   GraduationCap, Search, ChevronDown, Check, X, 
-  BookOpen, Building2, Layers
+  BookOpen, Building2, Layers, Landmark
 } from 'lucide-react';
 import { 
   FACULTY_CATALOG, 
@@ -14,8 +14,12 @@ import {
 
 /**
  * AcademicCombobox:
- * Searchable, linked dropdowns for Department and Degree Program
- * Tailored for dark glassmorphism registration/profile forms.
+ * Searchable, 3-tier hierarchical linked dropdowns:
+ * 1. Faculty Division
+ * 2. Academic Department
+ * 3. Degree Program
+ *
+ * Tailored for dark glassmorphism registration & complete profile modals.
  */
 export default function AcademicCombobox({
   selectedFaculty = '',
@@ -24,14 +28,18 @@ export default function AcademicCombobox({
   onDepartmentChange,
   selectedProgram = '',
   onProgramChange,
+  facultyError = null,
   departmentError = null,
   programError = null,
   required = true,
   disabled = false,
   containerStyle = {}
 }) {
+  const [isFacOpen, setIsFacOpen] = useState(false);
   const [isDeptOpen, setIsDeptOpen] = useState(false);
   const [isProgOpen, setIsProgOpen] = useState(false);
+
+  const [facSearch, setFacSearch] = useState('');
   const [deptSearch, setDeptSearch] = useState('');
   const [progSearch, setProgSearch] = useState('');
   const [facultyFilter, setFacultyFilter] = useState(selectedFaculty || 'all');
@@ -42,14 +50,20 @@ export default function AcademicCombobox({
     }
   }, [selectedFaculty]);
 
+  const facRef = useRef(null);
   const deptRef = useRef(null);
   const progRef = useRef(null);
+
+  const facInputRef = useRef(null);
   const deptInputRef = useRef(null);
   const progInputRef = useRef(null);
 
   // Close dropdowns on outside click
   useEffect(() => {
     const handleOutsideClick = (e) => {
+      if (facRef.current && !facRef.current.contains(e.target)) {
+        setIsFacOpen(false);
+      }
       if (deptRef.current && !deptRef.current.contains(e.target)) {
         setIsDeptOpen(false);
       }
@@ -62,6 +76,12 @@ export default function AcademicCombobox({
   }, []);
 
   // Auto focus search inputs when dropdowns open
+  useEffect(() => {
+    if (isFacOpen && facInputRef.current) {
+      setTimeout(() => facInputRef.current?.focus(), 50);
+    }
+  }, [isFacOpen]);
+
   useEffect(() => {
     if (isDeptOpen && deptInputRef.current) {
       setTimeout(() => deptInputRef.current?.focus(), 50);
@@ -96,12 +116,21 @@ export default function AcademicCombobox({
     return map;
   }, []);
 
+  // Filtered faculties
+  const filteredFaculties = useMemo(() => {
+    const query = facSearch.trim().toLowerCase();
+    if (!query) return FACULTIES;
+    return FACULTIES.filter(f => f.toLowerCase().includes(query));
+  }, [facSearch]);
+
   // Filtered departments based on search query and faculty filter
   const filteredDepartments = useMemo(() => {
     const query = deptSearch.trim().toLowerCase();
+    const activeFaculty = selectedFaculty || (facultyFilter !== 'all' ? facultyFilter : null);
+
     return DEPARTMENTS.filter(dept => {
       const faculty = deptToFacultyMap[dept] || '';
-      if (facultyFilter !== 'all' && faculty !== facultyFilter) {
+      if (activeFaculty && faculty !== activeFaculty) {
         return false;
       }
       if (!query) return true;
@@ -110,18 +139,24 @@ export default function AcademicCombobox({
         faculty.toLowerCase().includes(query)
       );
     });
-  }, [deptSearch, facultyFilter, deptToFacultyMap]);
+  }, [deptSearch, selectedFaculty, facultyFilter, deptToFacultyMap]);
 
-  // Available programs for the selected department (or all if none selected)
+  // Available programs for the selected department, or faculty, or all
   const availablePrograms = useMemo(() => {
     if (selectedDepartment && ACADEMIC_CATALOG[selectedDepartment]) {
       return ACADEMIC_CATALOG[selectedDepartment];
     }
-    // If no department is selected, list all unique programs
+    const activeFaculty = selectedFaculty || (facultyFilter !== 'all' ? facultyFilter : null);
+    if (activeFaculty && FACULTY_CATALOG[activeFaculty]) {
+      const progs = [];
+      Object.values(FACULTY_CATALOG[activeFaculty]).forEach(list => progs.push(...list));
+      return Array.from(new Set(progs));
+    }
+    // If neither is selected, list all unique programs
     const all = [];
     Object.values(ACADEMIC_CATALOG).forEach(list => all.push(...list));
     return Array.from(new Set(all));
-  }, [selectedDepartment]);
+  }, [selectedDepartment, selectedFaculty, facultyFilter]);
 
   // Filtered programs based on search query
   const filteredPrograms = useMemo(() => {
@@ -130,15 +165,24 @@ export default function AcademicCombobox({
     return availablePrograms.filter(prog => prog.toLowerCase().includes(query));
   }, [progSearch, availablePrograms]);
 
-  const handleFacultyFilterChange = (newFac) => {
-    setFacultyFilter(newFac);
-    if (newFac && newFac !== 'all') {
-      onFacultyChange?.(newFac);
-    } else {
-      onFacultyChange?.('');
+  // 1. SELECT FACULTY (Tier 1) - narrows departments & programs without auto-selecting
+  const handleSelectFaculty = (faculty) => {
+    setIsFacOpen(false);
+    setFacSearch('');
+    setFacultyFilter(faculty || 'all');
+    onFacultyChange?.(faculty);
+
+    // If current selected department does not belong to this faculty, reset dept and program
+    if (faculty && selectedDepartment) {
+      const deptsInFac = Object.keys(FACULTY_CATALOG[faculty] || {});
+      if (!deptsInFac.includes(selectedDepartment)) {
+        onDepartmentChange?.('');
+        onProgramChange?.('');
+      }
     }
   };
 
+  // 2. SELECT DEPARTMENT (Tier 2) - auto-sets faculty and narrows programs
   const handleSelectDepartment = (dept) => {
     onDepartmentChange?.(dept);
     setIsDeptOpen(false);
@@ -150,15 +194,16 @@ export default function AcademicCombobox({
       onFacultyChange?.(parentFaculty);
     }
 
-    // If current program does not belong to the selected department, switch to the first program or clear
+    // If current program does not belong to the selected department, clear it
     const deptPrograms = ACADEMIC_CATALOG[dept] || [];
     if (deptPrograms.length > 0 && !deptPrograms.includes(selectedProgram)) {
-      onProgramChange?.(deptPrograms[0]);
+      onProgramChange?.('');
     } else if (deptPrograms.length === 0) {
       onProgramChange?.('');
     }
   };
 
+  // 3. SELECT PROGRAM (Tier 3) - AUTOMATICALLY selects both Department and Faculty!
   const handleSelectProgram = (prog) => {
     onProgramChange?.(prog);
     setIsProgOpen(false);
@@ -187,10 +232,272 @@ export default function AcademicCombobox({
     }
   };
 
+  const displayFaculty = selectedFaculty || (facultyFilter !== 'all' ? facultyFilter : '');
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', ...containerStyle }}>
       
-      {/* 1. DEPARTMENT SELECTOR */}
+      {/* HIERARCHY HEADER */}
+      <div style={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'space-between', 
+        paddingBottom: '4px', 
+        borderBottom: '1px solid rgba(51,65,85,0.4)' 
+      }}>
+        <span style={{ 
+          fontSize: '11px', 
+          fontWeight: 800, 
+          color: '#a5b4fc', 
+          textTransform: 'uppercase', 
+          letterSpacing: '0.07em', 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '5px' 
+        }}>
+          <Layers size={13} style={{ color: '#818cf8' }} /> Academic Hierarchy
+        </span>
+        <span style={{ fontSize: '10px', color: '#64748b' }}>
+          1. Faculty → 2. Department → 3. Program
+        </span>
+      </div>
+
+      {/* 1. FACULTY SELECTOR (Tier 1) */}
+      <div ref={facRef} style={{ position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+          <label style={{
+            fontSize: '11px',
+            fontWeight: 700,
+            color: '#94a3b8',
+            textTransform: 'uppercase',
+            letterSpacing: '0.07em',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}>
+            <span style={{ 
+              width: '16px', 
+              height: '16px', 
+              borderRadius: '50%', 
+              background: '#6366f1', 
+              color: '#fff', 
+              fontSize: '9px', 
+              fontWeight: 900, 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center' 
+            }}>1</span>
+            <Building2 size={13} style={{ color: '#818cf8' }} />
+            <span>Faculty Division</span>
+            {required && <span style={{ color: '#f87171' }}>*</span>}
+          </label>
+
+          <span style={{ fontSize: '10px', color: '#64748b' }}>Filters departments</span>
+        </div>
+
+        {/* Trigger Button */}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            setIsFacOpen(prev => !prev);
+            setIsDeptOpen(false);
+            setIsProgOpen(false);
+          }}
+          style={{
+            width: '100%',
+            padding: '11px 14px',
+            boxSizing: 'border-box',
+            background: 'rgba(15,23,42,0.85)',
+            border: facultyError 
+              ? '1.5px solid #ef4444' 
+              : isFacOpen 
+                ? '1.5px solid #6366f1' 
+                : '1.5px solid rgba(51,65,85,0.9)',
+            borderRadius: '11px',
+            color: displayFaculty ? '#fff' : '#64748b',
+            fontSize: '13px',
+            fontWeight: 500,
+            textAlign: 'left',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '10px',
+            cursor: disabled ? 'not-allowed' : 'pointer',
+            boxShadow: isFacOpen ? '0 0 0 3px rgba(99,102,241,0.2)' : 'none',
+            transition: 'all 0.2s',
+            outline: 'none'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0, flex: 1 }}>
+            <Building2 size={16} style={{ color: displayFaculty ? '#818cf8' : '#64748b', shrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {displayFaculty || 'Select Faculty (1st Level)...'}
+            </span>
+          </div>
+          <ChevronDown 
+            size={16} 
+            style={{ 
+              color: '#94a3b8', 
+              transition: 'transform 0.2s', 
+              transform: isFacOpen ? 'rotate(180deg)' : 'none',
+              shrink: 0
+            }} 
+          />
+        </button>
+
+        {facultyError && (
+          <p style={{ fontSize: '11px', color: '#f87171', marginTop: '5px' }}>{facultyError}</p>
+        )}
+
+        {/* Dropdown Menu */}
+        {isFacOpen && (
+          <div style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            left: 0,
+            right: 0,
+            background: 'rgba(15, 23, 42, 0.98)',
+            border: '1px solid rgba(99, 102, 241, 0.35)',
+            borderRadius: '14px',
+            boxShadow: '0 20px 40px -10px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(99,102,241,0.15)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            zIndex: 110,
+            overflow: 'hidden',
+            animation: 'fadeIn 0.15s ease-out'
+          }}>
+            {/* Search Box */}
+            <div style={{ padding: '10px', borderBottom: '1px solid rgba(51,65,85,0.7)', background: 'rgba(30,41,59,0.5)' }}>
+              <div style={{ position: 'relative' }}>
+                <Search size={14} style={{ position: 'absolute', left: '10px', top: '10px', color: '#64748b' }} />
+                <input
+                  ref={facInputRef}
+                  type="text"
+                  value={facSearch}
+                  onChange={e => setFacSearch(e.target.value)}
+                  placeholder="Search 14 university faculties..."
+                  style={{
+                    width: '100%',
+                    padding: '8px 28px 8px 30px',
+                    boxSizing: 'border-box',
+                    background: 'rgba(15,23,42,0.9)',
+                    border: '1px solid rgba(99,102,241,0.3)',
+                    borderRadius: '8px',
+                    color: '#fff',
+                    fontSize: '12px',
+                    outline: 'none',
+                    fontWeight: 500
+                  }}
+                />
+                {facSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setFacSearch('')}
+                    style={{
+                      position: 'absolute',
+                      right: '8px',
+                      top: '8px',
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#94a3b8',
+                      cursor: 'pointer',
+                      padding: '2px'
+                    }}
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Faculty Items List */}
+            <div style={{ maxHeight: '250px', overflowY: 'auto', padding: '6px' }}>
+              {displayFaculty && (
+                <button
+                  type="button"
+                  onClick={() => handleSelectFaculty('')}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    boxSizing: 'border-box',
+                    background: 'transparent',
+                    border: '1px dashed rgba(148,163,184,0.3)',
+                    borderRadius: '8px',
+                    color: '#94a3b8',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    marginBottom: '4px'
+                  }}
+                >
+                  ✕ Clear Faculty Filter (Show All Faculties)
+                </button>
+              )}
+
+              {filteredFaculties.length === 0 ? (
+                <div style={{ padding: '20px 14px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>
+                  No faculties match "{facSearch}"
+                </div>
+              ) : (
+                filteredFaculties.map(fac => {
+                  const isSelected = displayFaculty === fac;
+                  const deptCount = Object.keys(FACULTY_CATALOG[fac] || {}).length;
+
+                  return (
+                    <button
+                      key={fac}
+                      type="button"
+                      onClick={() => handleSelectFaculty(fac)}
+                      style={{
+                        width: '100%',
+                        padding: '9px 12px',
+                        boxSizing: 'border-box',
+                        background: isSelected ? 'rgba(99,102,241,0.2)' : 'transparent',
+                        border: 'none',
+                        borderRadius: '9px',
+                        color: isSelected ? '#a5b4fc' : '#e2e8f0',
+                        fontSize: '12.5px',
+                        fontWeight: isSelected ? 700 : 500,
+                        textAlign: 'left',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '8px',
+                        cursor: 'pointer',
+                        transition: 'background 0.15s',
+                        marginBottom: '2px'
+                      }}
+                      onMouseEnter={e => {
+                        if (!isSelected) e.currentTarget.style.background = 'rgba(51,65,85,0.4)';
+                      }}
+                      onMouseLeave={e => {
+                        if (!isSelected) e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {fac}
+                        </span>
+                        <span style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
+                          {deptCount} department{deptCount !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+
+                      {isSelected && (
+                        <Check size={16} style={{ color: '#818cf8', shrink: 0 }} />
+                      )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+      
+      {/* 2. DEPARTMENT SELECTOR (Tier 2) */}
       <div ref={deptRef} style={{ position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
           <label style={{
@@ -201,9 +508,21 @@ export default function AcademicCombobox({
             letterSpacing: '0.07em',
             display: 'flex',
             alignItems: 'center',
-            gap: '5px'
+            gap: '6px'
           }}>
-            <Building2 size={13} style={{ color: '#818cf8' }} />
+            <span style={{ 
+              width: '16px', 
+              height: '16px', 
+              borderRadius: '50%', 
+              background: '#6366f1', 
+              color: '#fff', 
+              fontSize: '9px', 
+              fontWeight: 900, 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center' 
+            }}>2</span>
+            <GraduationCap size={13} style={{ color: '#818cf8' }} />
             <span>Academic Department</span>
             {required && <span style={{ color: '#f87171' }}>*</span>}
           </label>
@@ -232,6 +551,7 @@ export default function AcademicCombobox({
           disabled={disabled}
           onClick={() => {
             setIsDeptOpen(prev => !prev);
+            setIsFacOpen(false);
             setIsProgOpen(false);
           }}
           style={{
@@ -262,7 +582,7 @@ export default function AcademicCombobox({
           <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0, flex: 1 }}>
             <GraduationCap size={16} style={{ color: selectedDepartment ? '#818cf8' : '#64748b', shrink: 0 }} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {selectedDepartment || 'Select Department (Searchable)...'}
+              {selectedDepartment || 'Select Department (2nd Level)...'}
             </span>
           </div>
           <ChevronDown 
@@ -297,16 +617,16 @@ export default function AcademicCombobox({
             overflow: 'hidden',
             animation: 'fadeIn 0.15s ease-out'
           }}>
-            {/* Search Box & Faculty Filter */}
+            {/* Search Box */}
             <div style={{ padding: '10px', borderBottom: '1px solid rgba(51,65,85,0.7)', background: 'rgba(30,41,59,0.5)' }}>
-              <div style={{ position: 'relative', marginBottom: '8px' }}>
+              <div style={{ position: 'relative' }}>
                 <Search size={14} style={{ position: 'absolute', left: '10px', top: '10px', color: '#64748b' }} />
                 <input
                   ref={deptInputRef}
                   type="text"
                   value={deptSearch}
                   onChange={e => setDeptSearch(e.target.value)}
-                  placeholder="Search 60+ departments or faculties..."
+                  placeholder={displayFaculty ? `Search departments in ${displayFaculty}...` : "Search 60+ departments..."}
                   style={{
                     width: '100%',
                     padding: '8px 28px 8px 30px',
@@ -338,31 +658,6 @@ export default function AcademicCombobox({
                     <X size={13} />
                   </button>
                 )}
-              </div>
-
-              {/* Faculty Filter Pill Bar */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Layers size={12} style={{ color: '#818cf8', shrink: 0 }} />
-                <select
-                  value={facultyFilter}
-                  onChange={e => handleFacultyFilterChange(e.target.value)}
-                  style={{
-                    width: '100%',
-                    background: 'rgba(15,23,42,0.9)',
-                    border: '1px solid rgba(51,65,85,0.8)',
-                    borderRadius: '7px',
-                    color: '#cbd5e1',
-                    fontSize: '11px',
-                    padding: '5px 8px',
-                    outline: 'none',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <option value="all">All 14 Faculties</option>
-                  {FACULTIES.map(fac => (
-                    <option key={fac} value={fac}>{fac}</option>
-                  ))}
-                </select>
               </div>
             </div>
 
@@ -436,7 +731,7 @@ export default function AcademicCombobox({
         )}
       </div>
 
-      {/* 2. DEGREE PROGRAM SELECTOR */}
+      {/* 3. DEGREE PROGRAM SELECTOR (Tier 3) */}
       <div ref={progRef} style={{ position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
           <label style={{
@@ -447,18 +742,28 @@ export default function AcademicCombobox({
             letterSpacing: '0.07em',
             display: 'flex',
             alignItems: 'center',
-            gap: '5px'
+            gap: '6px'
           }}>
+            <span style={{ 
+              width: '16px', 
+              height: '16px', 
+              borderRadius: '50%', 
+              background: '#6366f1', 
+              color: '#fff', 
+              fontSize: '9px', 
+              fontWeight: 900, 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center' 
+            }}>3</span>
             <BookOpen size={13} style={{ color: '#818cf8' }} />
             <span>Degree Program</span>
             {required && <span style={{ color: '#f87171' }}>*</span>}
           </label>
 
-          {selectedDepartment && (
-            <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 600 }}>
-              {availablePrograms.length} programs available
-            </span>
-          )}
+          <span style={{ fontSize: '10px', color: '#818cf8', fontWeight: 600 }}>
+            Auto-fills Faculty & Dept
+          </span>
         </div>
 
         {/* Trigger Button */}
@@ -467,6 +772,7 @@ export default function AcademicCombobox({
           disabled={disabled}
           onClick={() => {
             setIsProgOpen(prev => !prev);
+            setIsFacOpen(false);
             setIsDeptOpen(false);
           }}
           style={{
@@ -497,7 +803,7 @@ export default function AcademicCombobox({
           <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0, flex: 1 }}>
             <BookOpen size={16} style={{ color: selectedProgram ? '#818cf8' : '#64748b', shrink: 0 }} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {selectedProgram || (selectedDepartment ? 'Select Degree Program (Searchable)...' : 'Select Program (or Department first)...')}
+              {selectedProgram || (selectedDepartment ? `Select Program in ${selectedDepartment}...` : 'Select Degree Program (3rd Level)...')}
             </span>
           </div>
           <ChevronDown 

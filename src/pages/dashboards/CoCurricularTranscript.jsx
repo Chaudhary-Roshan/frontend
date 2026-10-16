@@ -8,6 +8,7 @@ import {
 import { Link } from 'react-router-dom';
 import QRCode from 'react-qr-code';
 import { generateOfficialTranscriptPDF } from '../../utils/officialPdfGenerator';
+import { findFacultyForDepartment } from '../../utils/academicCatalog';
 
 const CoCurricularTranscript = () => {
   const { user } = useContext(AuthContext);
@@ -77,6 +78,7 @@ const CoCurricularTranscript = () => {
   const departmentName = profile?.department || user?.department || 'Department of Information and Communication Engineering';
   const rollNumber = profile?.roll_number || user?.roll_number || user?.username || 'N/A';
   const programName = profile?.program || user?.program || '';
+  const facultyName = profile?.faculty_name || user?.faculty_name || (departmentName ? findFacultyForDepartment(departmentName) : '') || '';
 
   const handleDownloadPDF = async () => {
     try {
@@ -85,6 +87,7 @@ const CoCurricularTranscript = () => {
       generateOfficialTranscriptPDF({
         studentName,
         rollNumber,
+        facultyName,
         departmentName,
         programName,
         academicYear: profile?.batch || '2023-2027',
@@ -179,10 +182,13 @@ const CoCurricularTranscript = () => {
               <span className="font-bold text-slate-800 text-sm mt-0.5 block">{rollNumber}</span>
             </div>
             <div>
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">Department</span>
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">Academic Affiliation</span>
+              {facultyName && (
+                <span className="text-[11px] font-bold text-indigo-700 block truncate" title={facultyName}>{facultyName}</span>
+              )}
               <span className="font-bold text-slate-800 text-sm mt-0.5 block">{departmentName}</span>
               {programName && (
-                <span className="text-[10px] text-slate-500 font-semibold block">{programName}</span>
+                <span className="text-[11px] text-slate-600 font-medium block">{programName}</span>
               )}
             </div>
             <div>

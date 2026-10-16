@@ -77,6 +77,7 @@ const Register = () => {
     first_name: '',
     last_name: '',
     cnic: '',
+    faculty_name: 'Faculty of Engineering',
     department: 'Department of Information and Communication Engineering',
     program: 'BS Cyber Security and Digital Forensics',
     batch: '',
@@ -175,6 +176,7 @@ const Register = () => {
         roll_number: rollNumber.trim().toUpperCase(),
         university_email: cleanEmail,
         cnic: formData.cnic,
+        faculty_name: formData.faculty_name,
         department: formData.department,
         program: formData.program,
         batch: formData.batch,
@@ -445,9 +447,11 @@ const Register = () => {
                 </InputField>
               </div>
 
-              {/* Searchable Academic Department & Degree Program Combobox */}
+              {/* Hierarchical Academic Selector: 1. Faculty -> 2. Department -> 3. Degree Program */}
               <div style={{ marginBottom: '14px' }}>
                 <AcademicCombobox
+                  selectedFaculty={formData.faculty_name}
+                  onFacultyChange={(fac) => setFormData(prev => ({ ...prev, faculty_name: fac }))}
                   selectedDepartment={formData.department}
                   onDepartmentChange={(dept) => setFormData(prev => ({ ...prev, department: dept }))}
                   selectedProgram={formData.program}

@@ -6,8 +6,13 @@ import {
 } from 'lucide-react';
 import api from '../../utils/api';
 import { AuthContext } from '../../context/AuthContext';
-import ImageUploader from '../common/ImageUploader';
 import { getMediaUrl, handleImageError } from '../../utils/media';
+import { 
+  FACULTIES, 
+  DEPARTMENTS, 
+  getDepartmentsForFaculty, 
+  findFacultyForDepartment 
+} from '../../utils/academicCatalog';
 
 /**
  * Universal Executive Staff & Faculty Profile Modal
@@ -44,6 +49,32 @@ const ExecutiveProfileModal = ({ isOpen, onClose, onProfileUpdated, customTitle 
     cnic: user?.cnic || '',
     avatar_url: user?.avatar_url || user?.profile_photo_url || '',
   });
+
+  const availableDepartments = React.useMemo(() => {
+    if (form.faculty_name) {
+      return getDepartmentsForFaculty(form.faculty_name);
+    }
+    return DEPARTMENTS;
+  }, [form.faculty_name]);
+
+  const handleFacultyChange = (newFac) => {
+    const deptsInFac = getDepartmentsForFaculty(newFac);
+    const keepDept = deptsInFac.includes(form.department);
+    setForm(prev => ({
+      ...prev,
+      faculty_name: newFac,
+      department: keepDept ? prev.department : ''
+    }));
+  };
+
+  const handleDepartmentChange = (newDept) => {
+    const parentFac = findFacultyForDepartment(newDept);
+    setForm(prev => ({
+      ...prev,
+      department: newDept,
+      faculty_name: parentFac || prev.faculty_name
+    }));
+  };
 
   // Password Change State
   const [showPasswordChange, setShowPasswordChange] = useState(false);
@@ -356,44 +387,58 @@ const ExecutiveProfileModal = ({ isOpen, onClose, onProfileUpdated, customTitle 
             </div>
           </div>
 
-          {/* 3. ACADEMIC & INSTITUTIONAL AFFILIATION */}
+          {/* 3. ACADEMIC & INSTITUTIONAL AFFILIATION (Hierarchical: Faculty -> Department) */}
           <div className="space-y-4">
-            <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5 border-b border-slate-100 pb-2">
-              <Building size={14} className="text-indigo-600" /> University & Department Affiliation
-            </h4>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                <Building size={14} className="text-indigo-600" /> Academic Hierarchy
+              </h4>
+              <span className="text-[10px] text-indigo-600 font-semibold">1. Faculty → 2. Department</span>
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* 1. Faculty Division */}
               <div>
                 <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1.5">
-                  Department
+                  1. Faculty / School Division
                 </label>
                 <div className="relative">
-                  <input
-                    type="text"
-                    name="department"
-                    value={form.department}
-                    onChange={handleChange}
-                    placeholder="e.g. Department of Computer Science"
-                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 hover:bg-slate-100/70 focus:bg-white border border-slate-200 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-900 outline-none transition"
-                  />
-                  <Building size={15} className="absolute left-3 top-3 text-slate-400" />
+                  <select
+                    name="faculty_name"
+                    value={form.faculty_name}
+                    onChange={e => handleFacultyChange(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 hover:bg-slate-100/70 focus:bg-white border border-slate-200 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-900 outline-none transition cursor-pointer"
+                  >
+                    <option value="">-- Select Faculty (1st Level) --</option>
+                    {FACULTIES.map(fac => (
+                      <option key={fac} value={fac}>{fac}</option>
+                    ))}
+                  </select>
+                  <GraduationCap size={15} className="absolute left-3 top-3 text-slate-400 pointer-events-none" />
                 </div>
               </div>
 
+              {/* 2. Department */}
               <div>
                 <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1.5">
-                  Faculty / School Division
+                  2. Department
                 </label>
                 <div className="relative">
-                  <input
-                    type="text"
-                    name="faculty_name"
-                    value={form.faculty_name}
-                    onChange={handleChange}
-                    placeholder="e.g. Faculty of Computing & Information Tech"
-                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 hover:bg-slate-100/70 focus:bg-white border border-slate-200 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-900 outline-none transition"
-                  />
-                  <GraduationCap size={15} className="absolute left-3 top-3 text-slate-400" />
+                  <select
+                    name="department"
+                    value={form.department}
+                    onChange={e => handleDepartmentChange(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 hover:bg-slate-100/70 focus:bg-white border border-slate-200 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-900 outline-none transition cursor-pointer"
+                  >
+                    <option value="">-- Select Department (2nd Level) --</option>
+                    {form.department && !availableDepartments.includes(form.department) && (
+                      <option value={form.department}>{form.department} (Current)</option>
+                    )}
+                    {availableDepartments.map(dept => (
+                      <option key={dept} value={dept}>{dept}</option>
+                    ))}
+                  </select>
+                  <Building size={15} className="absolute left-3 top-3 text-slate-400 pointer-events-none" />
                 </div>
               </div>
             </div>

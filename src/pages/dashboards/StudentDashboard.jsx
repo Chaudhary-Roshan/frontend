@@ -1712,28 +1712,77 @@ const StudentDashboard = () => {
                 />
               </div>
 
-              {/* Linked Academic Affiliation Dropdowns */}
-              <div className="p-3.5 bg-indigo-50/60 border border-indigo-100 rounded-2xl space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+              {/* Hierarchical Academic Affiliation: 1. Faculty -> 2. Department -> 3. Degree Program */}
+              <div className="p-4 bg-indigo-50/60 border border-indigo-100 rounded-2xl space-y-3.5">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 pb-1 border-b border-indigo-100/70">
                   <span className="text-[11px] font-black uppercase tracking-wider text-indigo-950 flex items-center gap-1.5">
-                    <GraduationCap size={15} className="text-indigo-600" /> Academic Affiliation
+                    <GraduationCap size={15} className="text-indigo-600" /> Academic Hierarchy
                   </span>
-                  <span className="text-[10px] text-indigo-600 font-medium">
-                    Selecting a program auto-selects department & faculty
+                  <span className="text-[10px] text-indigo-600 font-semibold">
+                    1. Faculty → 2. Department → 3. Degree Program
                   </span>
                 </div>
 
-                {/* Degree Program Dropdown */}
+                {/* 1. Faculty Division */}
                 <div>
-                  <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
-                    Degree Program <span className="text-indigo-600 font-normal lowercase">(Selecting auto-fills department & faculty)</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold uppercase text-slate-700 flex items-center gap-1.5">
+                      <span className="w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] font-black flex items-center justify-center">1</span>
+                      Faculty Division
+                    </label>
+                    <span className="text-[10px] text-slate-500 font-medium">Filters departments below</span>
+                  </div>
+                  <select
+                    value={editForm.faculty_name}
+                    onChange={e => handleEditFacultyChange(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-white border border-slate-200 hover:border-slate-300 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition cursor-pointer"
+                  >
+                    <option value="">-- Select Faculty (1st Level) --</option>
+                    {FACULTIES.map((fac) => (
+                      <option key={fac} value={fac}>{fac}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 2. Department */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold uppercase text-slate-700 flex items-center gap-1.5">
+                      <span className="w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] font-black flex items-center justify-center">2</span>
+                      Department
+                    </label>
+                    <span className="text-[10px] text-slate-500 font-medium">Filters programs below</span>
+                  </div>
+                  <select
+                    value={editForm.department}
+                    onChange={e => handleEditDepartmentChange(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-white border border-slate-200 hover:border-slate-300 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition cursor-pointer"
+                  >
+                    <option value="">-- Select Department (2nd Level) --</option>
+                    {editForm.department && !availableEditDepartments.includes(editForm.department) && (
+                      <option value={editForm.department}>{editForm.department} (Current)</option>
+                    )}
+                    {availableEditDepartments.map((dept) => (
+                      <option key={dept} value={dept}>{dept}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 3. Degree Program */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold uppercase text-slate-700 flex items-center gap-1.5">
+                      <span className="w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] font-black flex items-center justify-center">3</span>
+                      Degree Program
+                    </label>
+                    <span className="text-[10px] text-indigo-600 font-semibold">Auto-selects Faculty & Dept if picked first</span>
+                  </div>
                   <select
                     value={editForm.program}
                     onChange={e => handleEditProgramChange(e.target.value)}
                     className="w-full px-3 py-2.5 bg-white border border-indigo-200 hover:border-indigo-300 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition cursor-pointer"
                   >
-                    <option value="">-- Select Degree Program --</option>
+                    <option value="">-- Select Degree Program (3rd Level) --</option>
                     {editForm.program && !availableEditPrograms.includes(editForm.program) && (
                       <option value={editForm.program}>{editForm.program} (Current)</option>
                     )}
@@ -1741,44 +1790,6 @@ const StudentDashboard = () => {
                       <option key={prog} value={prog}>{prog}</option>
                     ))}
                   </select>
-                </div>
-
-                {/* Faculty & Department Dropdowns */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
-                      Faculty Division
-                    </label>
-                    <select
-                      value={editForm.faculty_name}
-                      onChange={e => handleEditFacultyChange(e.target.value)}
-                      className="w-full px-3 py-2.5 bg-white border border-slate-200 hover:border-slate-300 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition cursor-pointer"
-                    >
-                      <option value="">-- Select Faculty (Filters Below) --</option>
-                      {FACULTIES.map((fac) => (
-                        <option key={fac} value={fac}>{fac}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
-                      Department
-                    </label>
-                    <select
-                      value={editForm.department}
-                      onChange={e => handleEditDepartmentChange(e.target.value)}
-                      className="w-full px-3 py-2.5 bg-white border border-slate-200 hover:border-slate-300 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition cursor-pointer"
-                    >
-                      <option value="">-- Select Department --</option>
-                      {editForm.department && !availableEditDepartments.includes(editForm.department) && (
-                        <option value={editForm.department}>{editForm.department} (Current)</option>
-                      )}
-                      {availableEditDepartments.map((dept) => (
-                        <option key={dept} value={dept}>{dept}</option>
-                      ))}
-                    </select>
-                  </div>
                 </div>
               </div>
 
