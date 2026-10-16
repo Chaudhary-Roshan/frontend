@@ -964,9 +964,6 @@ const StudentDashboard = () => {
                   Event Entry Passes & QR Tickets ({registrations.length})
                 </h2>
               </div>
-              <p className="text-xs text-slate-500 mt-1 font-medium">
-                Official digital event tickets with complete participant information and scannable check-in barcodes.
-              </p>
             </div>
             <Link
               to="/events"
@@ -1264,9 +1261,6 @@ const StudentDashboard = () => {
                   Volunteer Service & Civic Engagement ({volunteerHours.length})
                 </h2>
               </div>
-              <p className="text-xs text-slate-500 mt-1 font-medium">
-                Official faculty-verified community service hours recorded on your institutional co-curricular transcript.
-              </p>
             </div>
             <div className="bg-emerald-50 border border-emerald-200 px-4 py-1.5 rounded-2xl flex items-center gap-2 self-start sm:self-auto">
               <Sparkles size={14} className="text-emerald-600" />
@@ -1712,53 +1706,40 @@ const StudentDashboard = () => {
                 />
               </div>
 
-              {/* Hierarchical Academic Affiliation: 1. Faculty -> 2. Department -> 3. Degree Program */}
+              {/* Academic Affiliation */}
               <div className="p-4 bg-indigo-50/60 border border-indigo-100 rounded-2xl space-y-3.5">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 pb-1 border-b border-indigo-100/70">
-                  <span className="text-[11px] font-black uppercase tracking-wider text-indigo-950 flex items-center gap-1.5">
-                    <GraduationCap size={15} className="text-indigo-600" /> Academic Hierarchy
-                  </span>
-                  <span className="text-[10px] text-indigo-600 font-semibold">
-                    1. Faculty → 2. Department → 3. Degree Program
-                  </span>
-                </div>
+                <span className="text-[11px] font-black uppercase tracking-wider text-indigo-950 flex items-center gap-1.5 pb-1 border-b border-indigo-100/70">
+                  <GraduationCap size={15} className="text-indigo-600" /> Academic Affiliation
+                </span>
 
-                {/* 1. Faculty Division */}
+                {/* Faculty Division */}
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] font-bold uppercase text-slate-700 flex items-center gap-1.5">
-                      <span className="w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] font-black flex items-center justify-center">1</span>
-                      Faculty Division
-                    </label>
-                    <span className="text-[10px] text-slate-500 font-medium">Filters departments below</span>
-                  </div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
+                    Faculty Division
+                  </label>
                   <select
                     value={editForm.faculty_name}
                     onChange={e => handleEditFacultyChange(e.target.value)}
                     className="w-full px-3 py-2.5 bg-white border border-slate-200 hover:border-slate-300 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition cursor-pointer"
                   >
-                    <option value="">-- Select Faculty (1st Level) --</option>
+                    <option value="">-- Select Faculty --</option>
                     {FACULTIES.map((fac) => (
                       <option key={fac} value={fac}>{fac}</option>
                     ))}
                   </select>
                 </div>
 
-                {/* 2. Department */}
+                {/* Department */}
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] font-bold uppercase text-slate-700 flex items-center gap-1.5">
-                      <span className="w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] font-black flex items-center justify-center">2</span>
-                      Department
-                    </label>
-                    <span className="text-[10px] text-slate-500 font-medium">Filters programs below</span>
-                  </div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
+                    Department
+                  </label>
                   <select
                     value={editForm.department}
                     onChange={e => handleEditDepartmentChange(e.target.value)}
                     className="w-full px-3 py-2.5 bg-white border border-slate-200 hover:border-slate-300 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition cursor-pointer"
                   >
-                    <option value="">-- Select Department (2nd Level) --</option>
+                    <option value="">-- Select Department --</option>
                     {editForm.department && !availableEditDepartments.includes(editForm.department) && (
                       <option value={editForm.department}>{editForm.department} (Current)</option>
                     )}
@@ -1768,21 +1749,17 @@ const StudentDashboard = () => {
                   </select>
                 </div>
 
-                {/* 3. Degree Program */}
+                {/* Degree Program */}
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] font-bold uppercase text-slate-700 flex items-center gap-1.5">
-                      <span className="w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] font-black flex items-center justify-center">3</span>
-                      Degree Program
-                    </label>
-                    <span className="text-[10px] text-indigo-600 font-semibold">Auto-selects Faculty & Dept if picked first</span>
-                  </div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
+                    Degree Program
+                  </label>
                   <select
                     value={editForm.program}
                     onChange={e => handleEditProgramChange(e.target.value)}
                     className="w-full px-3 py-2.5 bg-white border border-indigo-200 hover:border-indigo-300 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition cursor-pointer"
                   >
-                    <option value="">-- Select Degree Program (3rd Level) --</option>
+                    <option value="">-- Select Degree Program --</option>
                     {editForm.program && !availableEditPrograms.includes(editForm.program) && (
                       <option value={editForm.program}>{editForm.program} (Current)</option>
                     )}
@@ -1794,7 +1771,7 @@ const StudentDashboard = () => {
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">Gmail / University Email</label>
+                <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">Email Address</label>
                 <input
                   type="email"
                   required

@@ -400,8 +400,8 @@ export function generateOfficialTranscriptPDF(transcriptData, filename) {
   ];
 
   if (facultyName) {
-    bioRows.push(['1. Faculty Division:', facultyName, '2. Department:', departmentName]);
-    bioRows.push(['3. Degree Program:', programName, 'Session / Issuance:', `${academicYear} • ${issuanceDate}`]);
+    bioRows.push(['Faculty Division:', facultyName, 'Department:', departmentName]);
+    bioRows.push(['Degree Program:', programName, 'Session / Issuance:', `${academicYear} • ${issuanceDate}`]);
   } else {
     bioRows.push(['Academic Department:', departmentName, 'Degree Program:', programName]);
     bioRows.push(['Academic Session / Batch:', academicYear, 'Date of Issuance:', issuanceDate]);

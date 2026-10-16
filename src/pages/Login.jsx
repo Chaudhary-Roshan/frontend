@@ -340,11 +340,6 @@ const Login = () => {
                 onFocus={e => e.target.style.borderColor = loginPortal === 'student' ? '#6366f1' : '#8b5cf6'}
                 onBlur={e => e.target.style.borderColor = 'rgba(51,65,85,0.9)'}
               />
-              <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#64748b', fontWeight: 500 }}>
-                {loginPortal === 'student'
-                  ? 'Students must log in using their verified email address and password.'
-                  : 'Presidents, Faculty Advisors, and Super Admins must log in using their assigned username.'}
-              </p>
             </div>
 
             {/* Password Field */}
@@ -438,11 +433,6 @@ const Login = () => {
             </p>
           </div>
         </div>
-
-        {/* Security note */}
-        <p style={{ textAlign: 'center', fontSize: '11px', color: '#334155', marginTop: '16px' }}>
-          🔒 Your connection is encrypted · DSMS Secure Portal
-        </p>
       </div>
 
       {/* FORGOT PASSWORD MODAL */}

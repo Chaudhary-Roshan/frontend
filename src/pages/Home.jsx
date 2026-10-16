@@ -333,7 +333,6 @@ const Home = () => {
                 <Megaphone className="text-indigo-600" size={24} />
                 <h2 className="text-2xl font-black text-slate-900 tracking-tight">Campus News & Announcements</h2>
               </div>
-              <p className="text-sm text-slate-500 mt-1">Official updates from Society Presidents, Faculty Advisors, and Administration.</p>
             </div>
             <Link to="/news" className="text-xs font-bold text-indigo-600 hover:underline">
               View All News ({displayNews.length}) →

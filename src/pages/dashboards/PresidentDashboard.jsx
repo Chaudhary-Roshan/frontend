@@ -1505,25 +1505,6 @@ const PresidentDashboard = () => {
                 </button>
               </div>
 
-              {/* Workflow Stepper Guide Ribbon */}
-              <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-xs flex flex-wrap items-center justify-between gap-2">
-                <span className="font-bold text-slate-700 flex items-center gap-1.5">
-                  <ShieldCheck size={14} className="text-indigo-600" />
-                  Statutory Protocol:
-                </span>
-                <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-slate-500">
-                  <span className="bg-white px-2 py-0.5 rounded-md border border-slate-200">1. Draft & Generate</span>
-                  <span>&rarr;</span>
-                  <span className="bg-white px-2 py-0.5 rounded-md border border-slate-200">2. Download & Print PDF</span>
-                  <span>&rarr;</span>
-                  <span className="bg-white px-2 py-0.5 rounded-md border border-slate-200">3. Physical Advisor Signature</span>
-                  <span>&rarr;</span>
-                  <span className="bg-white px-2 py-0.5 rounded-md border border-slate-200">4. Upload Signed Scan</span>
-                  <span>&rarr;</span>
-                  <span className="bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-300 font-bold">5. Office Verification & Live Event</span>
-                </div>
-              </div>
-
               {proposals.length === 0 ? (
                 <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                   <Calendar className="w-10 h-10 text-slate-400 mx-auto mb-2" />

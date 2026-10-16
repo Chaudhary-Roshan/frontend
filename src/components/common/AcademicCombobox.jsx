@@ -237,32 +237,7 @@ export default function AcademicCombobox({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', ...containerStyle }}>
       
-      {/* HIERARCHY HEADER */}
-      <div style={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'space-between', 
-        paddingBottom: '4px', 
-        borderBottom: '1px solid rgba(51,65,85,0.4)' 
-      }}>
-        <span style={{ 
-          fontSize: '11px', 
-          fontWeight: 800, 
-          color: '#a5b4fc', 
-          textTransform: 'uppercase', 
-          letterSpacing: '0.07em', 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '5px' 
-        }}>
-          <Layers size={13} style={{ color: '#818cf8' }} /> Academic Hierarchy
-        </span>
-        <span style={{ fontSize: '10px', color: '#64748b' }}>
-          1. Faculty → 2. Department → 3. Program
-        </span>
-      </div>
-
-      {/* 1. FACULTY SELECTOR (Tier 1) */}
+      {/* 1. FACULTY SELECTOR */}
       <div ref={facRef} style={{ position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
           <label style={{
@@ -275,24 +250,10 @@ export default function AcademicCombobox({
             alignItems: 'center',
             gap: '6px'
           }}>
-            <span style={{ 
-              width: '16px', 
-              height: '16px', 
-              borderRadius: '50%', 
-              background: '#6366f1', 
-              color: '#fff', 
-              fontSize: '9px', 
-              fontWeight: 900, 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center' 
-            }}>1</span>
             <Building2 size={13} style={{ color: '#818cf8' }} />
             <span>Faculty Division</span>
             {required && <span style={{ color: '#f87171' }}>*</span>}
           </label>
-
-          <span style={{ fontSize: '10px', color: '#64748b' }}>Filters departments</span>
         </div>
 
         {/* Trigger Button */}
@@ -332,7 +293,7 @@ export default function AcademicCombobox({
           <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0, flex: 1 }}>
             <Building2 size={16} style={{ color: displayFaculty ? '#818cf8' : '#64748b', shrink: 0 }} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {displayFaculty || 'Select Faculty (1st Level)...'}
+              {displayFaculty || 'Select Faculty...'}
             </span>
           </div>
           <ChevronDown 
@@ -497,7 +458,7 @@ export default function AcademicCombobox({
         )}
       </div>
       
-      {/* 2. DEPARTMENT SELECTOR (Tier 2) */}
+      {/* 2. DEPARTMENT SELECTOR */}
       <div ref={deptRef} style={{ position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
           <label style={{
@@ -510,18 +471,6 @@ export default function AcademicCombobox({
             alignItems: 'center',
             gap: '6px'
           }}>
-            <span style={{ 
-              width: '16px', 
-              height: '16px', 
-              borderRadius: '50%', 
-              background: '#6366f1', 
-              color: '#fff', 
-              fontSize: '9px', 
-              fontWeight: 900, 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center' 
-            }}>2</span>
             <GraduationCap size={13} style={{ color: '#818cf8' }} />
             <span>Academic Department</span>
             {required && <span style={{ color: '#f87171' }}>*</span>}
@@ -582,7 +531,7 @@ export default function AcademicCombobox({
           <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0, flex: 1 }}>
             <GraduationCap size={16} style={{ color: selectedDepartment ? '#818cf8' : '#64748b', shrink: 0 }} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {selectedDepartment || 'Select Department (2nd Level)...'}
+              {selectedDepartment || 'Select Department...'}
             </span>
           </div>
           <ChevronDown 
@@ -731,7 +680,7 @@ export default function AcademicCombobox({
         )}
       </div>
 
-      {/* 3. DEGREE PROGRAM SELECTOR (Tier 3) */}
+      {/* 3. DEGREE PROGRAM SELECTOR */}
       <div ref={progRef} style={{ position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
           <label style={{
@@ -744,26 +693,10 @@ export default function AcademicCombobox({
             alignItems: 'center',
             gap: '6px'
           }}>
-            <span style={{ 
-              width: '16px', 
-              height: '16px', 
-              borderRadius: '50%', 
-              background: '#6366f1', 
-              color: '#fff', 
-              fontSize: '9px', 
-              fontWeight: 900, 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center' 
-            }}>3</span>
             <BookOpen size={13} style={{ color: '#818cf8' }} />
             <span>Degree Program</span>
             {required && <span style={{ color: '#f87171' }}>*</span>}
           </label>
-
-          <span style={{ fontSize: '10px', color: '#818cf8', fontWeight: 600 }}>
-            Auto-fills Faculty & Dept
-          </span>
         </div>
 
         {/* Trigger Button */}
@@ -803,7 +736,7 @@ export default function AcademicCombobox({
           <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0, flex: 1 }}>
             <BookOpen size={16} style={{ color: selectedProgram ? '#818cf8' : '#64748b', shrink: 0 }} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {selectedProgram || (selectedDepartment ? `Select Program in ${selectedDepartment}...` : 'Select Degree Program (3rd Level)...')}
+              {selectedProgram || (selectedDepartment ? `Select Program in ${selectedDepartment}...` : 'Select Degree Program...')}
             </span>
           </div>
           <ChevronDown 

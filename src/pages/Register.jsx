@@ -368,8 +368,7 @@ const Register = () => {
               </InputField>
 
               {/* Single Email Address */}
-              <InputField label="Email Address (Receives OTP)" required error={fieldErrors.email}
-                hint="Single email used for account registration, sign in, and receiving your OTP verification code.">
+              <InputField label="Email Address" required error={fieldErrors.email}>
                 <input
                   type="email"
                   name="email"
@@ -559,20 +558,6 @@ const Register = () => {
                 )}
               </InputField>
 
-              {/* Security Notice */}
-              <div style={{
-                display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '12px 14px',
-                background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)',
-                borderRadius: '11px', marginBottom: '18px'
-              }}>
-                <ShieldCheck size={15} style={{ color: '#818cf8', flexShrink: 0, marginTop: '1px' }} />
-                <p style={{ fontSize: '11px', color: '#64748b', margin: 0, lineHeight: 1.5 }}>
-                  By registering, you confirm that you are an enrolled student at the university.
-                  Only <strong style={{ color: '#94a3b8' }}>student accounts</strong> can be self-registered.
-                  Executive roles are provisioned by the Super Admin.
-                </p>
-              </div>
-
               <button
                 type="submit"
                 disabled={isSubmitting}
@@ -718,10 +703,6 @@ const Register = () => {
             </p>
           </div>
         </div>
-
-        <p style={{ textAlign: 'center', fontSize: '11px', color: '#334155', marginTop: '14px' }}>
-          🔒 Your connection is encrypted · DSMS Secure Portal
-        </p>
       </div>
 
       <style>{`
