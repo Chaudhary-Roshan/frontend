@@ -1,6 +1,8 @@
+import { MediaImage } from './AuthenticatedMedia';
 import React, { useState, useRef } from 'react';
 import { UploadCloud, Image as ImageIcon, X, CheckCircle, FileText, Loader2, Camera } from 'lucide-react';
 import { uploadFileToServer, uploadFilesToServer } from '../../utils/fileUpload';
+import { getMediaUrl, handleImageError } from '../../utils/media';
 
 /**
  * Universal Image & Document Uploader for DSMS
@@ -32,15 +34,20 @@ const ImageUploader = ({
   const fileInputRef = useRef(null);
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [localPreview, setLocalPreview] = useState(null);
   const [bulkFiles, setBulkFiles] = useState([]); // Array of { file, previewUrl, name, size }
 
   const acceptTypes = acceptDocs 
     ? "image/*,application/pdf" 
     : "image/*";
 
-  // Handle single file selection
+  // Handle single file selection with instant local blob preview
   const handleSingleFile = async (file) => {
     if (!file) return;
+    if (file.type && file.type.startsWith('image/')) {
+      const blobUrl = URL.createObjectURL(file);
+      setLocalPreview(blobUrl);
+    }
     setIsUploading(true);
     try {
       const uploadedUrl = await uploadFileToServer(file, folder);
@@ -48,6 +55,7 @@ const ImageUploader = ({
     } catch (err) {
       console.error("Single file upload error:", err);
       alert("Failed to process image file. Please try again.");
+      setLocalPreview(null);
     } finally {
       setIsUploading(false);
     }
@@ -194,7 +202,7 @@ const ImageUploader = ({
               {bulkFiles.map((item, idx) => (
                 <div key={idx} className="relative group rounded-xl overflow-hidden aspect-square bg-slate-200 border border-slate-300 shadow-xs">
                   {item.previewUrl ? (
-                    <img src={item.previewUrl} alt={item.name} className="w-full h-full object-cover" />
+                    <MediaImage src={item.previewUrl} alt={item.name} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center p-1 text-[9px] text-slate-600">
                       <FileText size={16} className="text-slate-400" />
@@ -225,8 +233,14 @@ const ImageUploader = ({
     );
   }
 
+  const handleRemoveSingle = () => {
+    setLocalPreview(null);
+    if (onChange) onChange('');
+  };
+
   /* ------------------- AVATAR / CIRCLE UPLOAD VIEW ------------------- */
   if (shape === 'avatar') {
+    const avatarSrc = localPreview || value;
     return (
       <div className="space-y-2">
         {label && (
@@ -240,8 +254,13 @@ const ImageUploader = ({
             onClick={() => fileInputRef.current?.click()}
             className="relative w-20 h-20 rounded-2xl overflow-hidden border-2 border-indigo-200 bg-slate-100 flex items-center justify-center cursor-pointer group shadow-sm shrink-0"
           >
-            {value ? (
-              <img src={value} alt="Avatar" className="w-full h-full object-cover" />
+            {avatarSrc ? (
+              <img
+                src={localPreview || getMediaUrl(value)}
+                onError={handleImageError}
+                alt="Avatar"
+                className="w-full h-full object-cover"
+              />
             ) : (
               <ImageIcon className="text-slate-400" size={28} />
             )}
@@ -266,15 +285,27 @@ const ImageUploader = ({
               onChange={onFileChange}
               className="hidden"
             />
-            <button
-              type="button"
-              disabled={isUploading}
-              onClick={() => fileInputRef.current?.click()}
-              className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-            >
-              <UploadCloud size={14} />
-              {isUploading ? "Uploading..." : "Upload from Gallery / PC"}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={isUploading}
+                onClick={() => fileInputRef.current?.click()}
+                className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <UploadCloud size={14} />
+                {isUploading ? "Uploading..." : (avatarSrc ? "Change Photo" : "Upload from Gallery / PC")}
+              </button>
+              {avatarSrc && (
+                <button
+                  type="button"
+                  onClick={handleRemoveSingle}
+                  className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-600 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                  title="Remove photo"
+                >
+                  <X size={13} /> Remove
+                </button>
+              )}
+            </div>
             <p className="text-[11px] text-slate-400 leading-tight">
               {hint}
             </p>
@@ -285,6 +316,8 @@ const ImageUploader = ({
   }
 
   /* ------------------- BANNER / DOCUMENT / CARD UPLOAD VIEW ------------------- */
+  const activeDisplaySrc = localPreview || value;
+
   return (
     <div className="space-y-2">
       {label && (
@@ -292,8 +325,8 @@ const ImageUploader = ({
           <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
             {label}
           </label>
-          {value && (
-            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+          {activeDisplaySrc && (
+            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
               <CheckCircle size={10} /> Selected
             </span>
           )}
@@ -308,9 +341,9 @@ const ImageUploader = ({
         className="hidden"
       />
 
-      {value ? (
+      {activeDisplaySrc ? (
         <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-slate-50 group shadow-sm">
-          {shape === 'document' && (value.endsWith('.pdf') || !value.match(/\.(jpeg|jpg|gif|png|webp)/i)) ? (
+          {shape === 'document' && (value && (value.endsWith('.pdf') || !value.match(/\.(jpeg|jpg|gif|png|webp)/i))) ? (
             <div className="p-4 flex items-center justify-between bg-indigo-50/50">
               <div className="flex items-center gap-2 text-indigo-900 font-bold text-xs">
                 <FileText className="text-indigo-600 shrink-0" size={20} />
@@ -318,7 +351,7 @@ const ImageUploader = ({
               </div>
               <button
                 type="button"
-                onClick={() => onChange('')}
+                onClick={handleRemoveSingle}
                 className="text-slate-400 hover:text-rose-600 p-1"
                 title="Remove"
               >
@@ -327,19 +360,24 @@ const ImageUploader = ({
             </div>
           ) : (
             <div className="relative h-36 w-full bg-slate-900">
-              <img src={value} alt="Preview" className="w-full h-full object-cover" />
-              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+              <img
+                src={localPreview || getMediaUrl(value)}
+                onError={handleImageError}
+                alt="Preview"
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-black/50 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-3 py-1.5 bg-white/90 hover:bg-white text-slate-900 rounded-xl text-xs font-bold shadow-md cursor-pointer flex items-center gap-1"
+                  className="px-3.5 py-1.5 bg-white hover:bg-slate-100 text-slate-900 rounded-xl text-xs font-bold shadow-md cursor-pointer flex items-center gap-1.5"
                 >
                   <Camera size={13} /> Change Image
                 </button>
                 <button
                   type="button"
-                  onClick={() => onChange('')}
-                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer flex items-center gap-1"
+                  onClick={handleRemoveSingle}
+                  className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer flex items-center gap-1.5"
                 >
                   <X size={13} /> Remove
                 </button>
@@ -349,8 +387,8 @@ const ImageUploader = ({
 
           {isUploading && (
             <div className="absolute inset-0 bg-indigo-950/70 text-white flex flex-col items-center justify-center gap-1 z-10">
-              <Loader2 className="animate-spin" size={24} />
-              <span className="text-xs font-bold">Uploading new image...</span>
+              <Loader2 className="animate-spin text-white" size={24} />
+              <span className="text-xs font-bold">Processing image...</span>
             </div>
           )}
         </div>

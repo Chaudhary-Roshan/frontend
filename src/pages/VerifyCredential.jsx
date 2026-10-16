@@ -1,7 +1,9 @@
+import { MediaImage } from '../components/common/AuthenticatedMedia';
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ShieldCheck, CheckCircle, XCircle, Loader2, QrCode, BadgeCheck } from 'lucide-react';
 import api from '../utils/api';
+import { getMediaUrl, handleImageError } from '../utils/media';
 
 const VerifyPage = ({ type }) => {
   const { code } = useParams();
@@ -80,7 +82,7 @@ const VerifyPage = ({ type }) => {
                 <div className="rounded-3xl p-6 space-y-4" style={{ background: 'rgba(30,41,59,0.9)', border: '1px solid rgba(71,85,105,0.7)' }}>
                   <div className="flex items-center gap-4">
                     <div className="w-16 h-16 rounded-2xl overflow-hidden flex-shrink-0" style={{ border: '2px solid rgba(99,102,241,0.4)' }}>
-                      <img
+                      <MediaImage
                         src={result.student.avatar_url || defaultAvatar}
                         alt={result.student.full_name}
                         className="w-full h-full object-cover"
@@ -115,7 +117,13 @@ const VerifyPage = ({ type }) => {
                   <div className="rounded-3xl p-6 space-y-4" style={{ background: 'rgba(30,41,59,0.9)', border: '1px solid rgba(71,85,105,0.7)' }}>
                     <div className="flex items-center gap-3 pb-3" style={{ borderBottom: '1px solid rgba(71,85,105,0.6)' }}>
                       {result.society.logo ? (
-                        <img src={result.society.logo} alt={result.society.name} className="w-10 h-10 rounded-xl object-cover" style={{ border: '1px solid rgba(71,85,105,0.6)' }} />
+                        <MediaImage
+                          src={getMediaUrl(result.society.logo)}
+                          onError={handleImageError}
+                          alt={result.society.name}
+                          className="w-10 h-10 rounded-xl object-cover"
+                          style={{ border: '1px solid rgba(71,85,105,0.6)' }}
+                        />
                       ) : (
                         <div className="w-10 h-10 rounded-xl bg-indigo-700 flex items-center justify-center font-black text-white text-sm">
                           {result.society.name?.substring(0, 2).toUpperCase()}
@@ -152,7 +160,13 @@ const VerifyPage = ({ type }) => {
                   <div className="rounded-3xl p-6 space-y-4" style={{ background: 'rgba(30,41,59,0.9)', border: '1px solid rgba(71,85,105,0.7)' }}>
                     <div className="flex items-center gap-3 pb-3" style={{ borderBottom: '1px solid rgba(71,85,105,0.6)' }}>
                       {result.society?.logo ? (
-                        <img src={result.society.logo} alt={result.society.name} className="w-10 h-10 rounded-xl object-cover" style={{ border: '1px solid rgba(71,85,105,0.6)' }} />
+                        <MediaImage
+                          src={getMediaUrl(result.society.logo)}
+                          onError={handleImageError}
+                          alt={result.society.name}
+                          className="w-10 h-10 rounded-xl object-cover"
+                          style={{ border: '1px solid rgba(71,85,105,0.6)' }}
+                        />
                       ) : (
                         <div className="w-10 h-10 rounded-xl bg-violet-700 flex items-center justify-center font-black text-white text-sm">
                           {result.society?.name?.substring(0, 2).toUpperCase()}

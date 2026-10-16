@@ -21,7 +21,7 @@ const BudgetManagement = () => {
     } catch (err) { console.error(err); }
   };
 
-  useEffect(() => { fetchData(); }, [user]);
+  useEffect(() => { fetchData(); }, []);
 
   const handleAddBudget = async (e) => {
     e.preventDefault();

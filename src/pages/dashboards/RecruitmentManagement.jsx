@@ -6,10 +6,11 @@ import {
   CheckCircle2, XCircle, ArrowRight, UserCheck, Search, Filter, 
   FileText, Download, ShieldCheck, Mail, Sparkles, ChevronRight
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 const RecruitmentManagement = () => {
   const { user } = useContext(AuthContext);
+  const [searchParams] = useSearchParams();
   const [recruitments, setRecruitments] = useState([]);
   const [applications, setApplications] = useState([]);
   const [selectedRecruitment, setSelectedRecruitment] = useState(null);
@@ -23,25 +24,29 @@ const RecruitmentManagement = () => {
   const [updatingAppId, setUpdatingAppId] = useState(null);
   const [interviewForms, setInterviewForms] = useState({});
 
+  const querySocId = searchParams.get('society');
+  const userSocId = querySocId 
+    ? Number(querySocId) 
+    : (user?.society || user?.society_id || (user?.presided_societies && user.presided_societies[0]?.id) || (user?.advised_societies && user.advised_societies[0]?.id));
+
   useEffect(() => {
     fetchRecruitments();
-  }, [user]);
+  }, [userSocId, user?.id]);
 
   const fetchRecruitments = async () => {
     try {
+      const params = userSocId ? { society: userSocId } : {};
       const [recRes, appRes] = await Promise.all([
-        api.get('recruitments/'),
-        api.get('applications/')
+        api.get('recruitments/', { params }),
+        api.get('applications/', { params })
       ]);
       let recs = Array.isArray(recRes.data) ? recRes.data : [];
       let apps = Array.isArray(appRes.data) ? appRes.data : [];
       
-      const userSocId = user?.society || user?.society_id || (user?.advised_societies && user.advised_societies[0]?.id) || (user?.presided_societies && user.presided_societies[0]?.id);
-
       if (user?.role === 'president' || user?.role === 'faculty') {
         if (userSocId) {
-          recs = recs.filter(r => r.society === userSocId);
-          apps = apps.filter(a => a.recruitment_society === userSocId || a.society === userSocId);
+          recs = recs.filter(r => r.society === userSocId || r.society?.id === userSocId);
+          apps = apps.filter(a => a.recruitment_society === userSocId || a.society === userSocId || a.recruitment_society_id === userSocId);
         }
       }
 
@@ -58,9 +63,13 @@ const RecruitmentManagement = () => {
 
       setRecruitments(uniqueRecs);
       setApplications(apps);
-      if (uniqueRecs.length > 0 && !selectedRecruitment) {
-        setSelectedRecruitment(uniqueRecs[0]);
-      } else if (uniqueRecs.length === 0) {
+      if (uniqueRecs.length > 0) {
+        setSelectedRecruitment(prev => {
+          if (!prev) return uniqueRecs[0];
+          const found = uniqueRecs.find(r => r.id === prev.id);
+          return found || uniqueRecs[0];
+        });
+      } else {
         setSelectedRecruitment(null);
       }
     } catch (err) {
@@ -70,8 +79,6 @@ const RecruitmentManagement = () => {
 
   const handleCreateDrive = async (e) => {
     e.preventDefault();
-    const userSocId = user?.society || user?.society_id || (user?.advised_societies && user.advised_societies[0]?.id) || (user?.presided_societies && user.presided_societies[0]?.id);
-
     if (!userSocId && user?.role !== 'admin') {
       alert("No society assigned to your account. Cannot launch recruitment drive.");
       return;
@@ -181,32 +188,53 @@ const RecruitmentManagement = () => {
         </div>
 
         {/* DRIVE SELECTOR STRIP */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-4 shadow-sm flex items-center gap-3 overflow-x-auto">
-          <span className="text-xs font-black uppercase tracking-wider text-slate-400 px-3 whitespace-nowrap">
-            Select Drive:
-          </span>
-          {recruitments.map(rec => {
-            const count = applications.filter(a => a.recruitment === rec.id).length;
-            const isSelected = selectedRecruitment?.id === rec.id;
+        {recruitments.length > 0 && (
+          <div className="bg-white border border-slate-200 rounded-3xl p-4 shadow-sm flex items-center gap-3 overflow-x-auto">
+            <span className="text-xs font-black uppercase tracking-wider text-slate-400 px-3 whitespace-nowrap">
+              Select Drive:
+            </span>
+            {recruitments.map(rec => {
+              const count = applications.filter(a => a.recruitment === rec.id).length;
+              const isSelected = selectedRecruitment?.id === rec.id;
 
-            return (
-              <button
-                key={rec.id}
-                onClick={() => setSelectedRecruitment(rec)}
-                className={`px-4 py-2.5 rounded-2xl text-xs font-bold flex items-center gap-2.5 transition whitespace-nowrap cursor-pointer ${
-                  isSelected
-                    ? 'bg-slate-900 text-white shadow-sm'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                <span>{rec.title}</span>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full ${isSelected ? 'bg-violet-500 text-white' : 'bg-slate-200 text-slate-700'}`}>
-                  {count} Applicants
-                </span>
-              </button>
-            );
-          })}
-        </div>
+              return (
+                <button
+                  key={rec.id}
+                  onClick={() => setSelectedRecruitment(rec)}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-bold flex items-center gap-2.5 transition whitespace-nowrap cursor-pointer ${
+                    isSelected
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  <span>{rec.title}</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${isSelected ? 'bg-violet-500 text-white' : 'bg-slate-200 text-slate-700'}`}>
+                    {count} Applicants
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* EMPTY STATE IF NO RECRUITMENT DRIVES */}
+        {recruitments.length === 0 && (
+          <div className="bg-white border-2 border-dashed border-slate-200 rounded-3xl p-12 text-center flex flex-col items-center justify-center">
+            <div className="w-16 h-16 bg-violet-50 text-violet-600 rounded-2xl flex items-center justify-center mb-4">
+              <UserPlus size={28} />
+            </div>
+            <h3 className="text-lg font-bold text-slate-800">No Recruitment Drives Found</h3>
+            <p className="text-slate-500 text-xs max-w-md mt-1 mb-6 font-medium">
+              You are currently viewing recruitment drives scoped strictly to your society. Launch an official drive to begin accepting member and cabinet applications.
+            </p>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="bg-violet-600 hover:bg-violet-700 text-white px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 shadow-lg shadow-violet-600/30 transition cursor-pointer"
+            >
+              <UserPlus size={16} /> Launch First Recruitment Drive
+            </button>
+          </div>
+        )}
 
         {/* RECRUITMENT PIPELINE MAIN VIEW */}
         {selectedRecruitment && (

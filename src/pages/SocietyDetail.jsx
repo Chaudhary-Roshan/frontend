@@ -1,5 +1,6 @@
+import { MediaImage, MediaLink } from '../components/common/AuthenticatedMedia';
 import React, { useEffect, useState, useContext, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { AuthContext } from '../context/AuthContext';
 import { 
@@ -11,6 +12,8 @@ import {
 } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import ImageUploader from '../components/common/ImageUploader';
+import { getMediaUrl, handleImageError, DEFAULT_SOCIETY_LOGO } from '../utils/media';
+import { sortSocietyMembers, getDynamicRoleRank } from '../utils/hierarchy';
 
 const InstagramIcon = ({ size = 16, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -61,16 +64,11 @@ const TwitterIcon = ({ size = 16, className = "" }) => (
   </svg>
 );
 
-const formatAvatarUrl = (url) => {
-  if (!url) return '';
-  if (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:')) return url;
-  const baseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/api\/?$/, '');
-  const clean = url.startsWith('/') ? url : `/${url}`;
-  return baseUrl ? `${baseUrl}${clean}` : clean;
-};
+const formatAvatarUrl = (url) => getMediaUrl(url);
 
 const SocietyDetail = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { user } = useContext(AuthContext);
   const [society, setSociety] = useState(null);
   const [events, setEvents] = useState([]);
@@ -130,15 +128,19 @@ const SocietyDetail = () => {
     fetchLockedDates();
 
     const handleSync = (e) => {
-      if (!e.detail || !e.detail.id || e.detail.id === parseInt(id)) {
+      if (!e?.detail?.id || e.detail.id === parseInt(id)) {
         fetchSocietyData();
       }
     };
 
     window.addEventListener('dsms:society_updated', handleSync);
+    window.addEventListener('dsms:cabinet_updated', handleSync);
+    window.addEventListener('dsms:data_synced', handleSync);
     window.addEventListener('storage', fetchSocietyData);
     return () => {
       window.removeEventListener('dsms:society_updated', handleSync);
+      window.removeEventListener('dsms:cabinet_updated', handleSync);
+      window.removeEventListener('dsms:data_synced', handleSync);
       window.removeEventListener('storage', fetchSocietyData);
     };
   }, [id]);
@@ -152,11 +154,11 @@ const SocietyDetail = () => {
     try {
       const [socRes, evRes, recRes, cabRes, galRes, memRes] = await Promise.allSettled([
         api.get(`societies/${id}/`),
-        api.get(`events/`),
+        api.get(`events/`, { params: { society: id } }),
         api.get(`recruitments/`),
-        api.get(`cabinet/`),
+        api.get(`cabinet/`, { params: { society: id, active_only: 'true' } }),
         api.get(`gallery/`),
-        api.get(`memberships/`)
+        user ? api.get(`memberships/`) : Promise.resolve({ data: [] })
       ]);
 
       if (socRes.status === 'fulfilled') setSociety(socRes.value.data);
@@ -177,7 +179,16 @@ const SocietyDetail = () => {
         setRecruitments(uniqueRecs);
       }
       if (cabRes.status === 'fulfilled') {
-        setCabinet(cabRes.value.data.filter(c => c.society === parseInt(id)));
+        const rawCab = Array.isArray(cabRes.value.data) ? cabRes.value.data : [];
+        // Strictly filter by society ID, active assignment status, and verified status
+        const activeSocCabinet = rawCab.filter(c => 
+          Number(c.society) === parseInt(id) && 
+          c.is_active === true && 
+          c.is_verified === true
+        );
+        setCabinet(activeSocCabinet);
+      } else if (socRes.status === 'fulfilled' && Array.isArray(socRes.value.data?.cabinet_members)) {
+        setCabinet(socRes.value.data.cabinet_members.filter(c => c.is_active === true && c.is_verified === true));
       }
       if (galRes.status === 'fulfilled') {
         setGalleries(galRes.value.data.filter(g => g.society === parseInt(id)));
@@ -244,7 +255,10 @@ const SocietyDetail = () => {
     try {
       await api.post('gallery/', {
         society: parseInt(id),
-        image_url: galleryUrl.trim()
+        image_url: galleryUrl.trim(),
+        title: 'Society Showcase',
+        album_name: 'General Showcase',
+        is_public: true
       });
       showToast("Photo added to society gallery!");
       setShowGalleryModal(false);
@@ -257,6 +271,14 @@ const SocietyDetail = () => {
 
   const handleApply = async (e) => {
     e.preventDefault();
+    if (!user) {
+      navigate('/login', { state: { from: `/societies/${id}` } });
+      return;
+    }
+    if (user.role !== 'student') {
+      alert('Only enrolled students can apply for society recruitment.');
+      return;
+    }
     const positionTitle = typeof selectedPosition === 'string' ? selectedPosition : (selectedPosition?.title || applyRole);
     if (!positionTitle) {
       alert('Please select a position to apply for.');
@@ -288,6 +310,14 @@ const SocietyDetail = () => {
 
   const handleMembershipApply = async (e) => {
     e.preventDefault();
+    if (!user) {
+      navigate('/login', { state: { from: `/societies/${id}` } });
+      return;
+    }
+    if (user.role !== 'student') {
+      alert('Only enrolled students can apply for society membership.');
+      return;
+    }
     if (!membershipProof.trim() && society.membership_fee > 0) {
       alert('Please upload your payment proof screenshot.');
       return;
@@ -318,6 +348,14 @@ const SocietyDetail = () => {
   const handleEventRegistration = async (e) => {
     if (e) e.preventDefault();
     if (!selectedEventForReg) return;
+    if (!user) {
+      navigate('/login', { state: { from: `/societies/${id}` } });
+      return;
+    }
+    if (user.role !== 'student') {
+      alert('Only enrolled students can register for event tickets.');
+      return;
+    }
     setIsRegistering(true);
 
     try {
@@ -375,6 +413,36 @@ const SocietyDetail = () => {
   const pastEvents = events.filter(e => new Date(e.date) < now);
   const openRecruitments = recruitments.filter(r => r.status === 'open');
 
+  // Avoid duplicate cards: President and Advisor already have separate dedicated leadership cards
+  const advisorId = society?.advisor?.id || society?.advisor;
+  const presidentId = society?.president?.id || society?.president;
+  const advisorUsername = (society?.advisor_name || '').toLowerCase();
+  const presidentUsername = (society?.president_name || '').toLowerCase();
+  const advisorFullName = (society?.advisor_full_name || '').toLowerCase();
+  const presidentFullName = (society?.president_full_name || '').toLowerCase();
+
+  const displayedCabinet = sortSocietyMembers(
+    cabinet.filter(m => {
+      if (!m) return false;
+      const memUserId = m.student_id || m.user;
+      const memUsername = (m.username || '').toLowerCase();
+      const memFullName = (m.full_name || '').toLowerCase();
+      
+      // Check if matches Advisor
+      if (advisorId && (memUserId === advisorId || Number(memUserId) === Number(advisorId))) return false;
+      if (advisorUsername && (memUsername === advisorUsername || (advisorFullName && memFullName === advisorFullName))) return false;
+      
+      // Check if matches President
+      if (presidentId && (memUserId === presidentId || Number(memUserId) === Number(presidentId))) return false;
+      if (presidentUsername && (memUsername === presidentUsername || (presidentFullName && memFullName === presidentFullName))) return false;
+
+      return true;
+    })
+  );
+
+  const totalLeadershipCount = (society?.advisor_name || society?.advisor ? 1 : 0) + (society?.president_name || society?.president ? 1 : 0);
+  const totalTeamCount = displayedCabinet.length + totalLeadershipCount;
+
   if (!society) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
@@ -393,26 +461,32 @@ const SocietyDetail = () => {
         </div>
       )}
 
-      {/* 1. COVER BANNER & SOCIETY HEADER (Crisp, High-Resolution, Completely Visible & Zero Blur) */}
+      {/* 1. COVER BANNER & SOCIETY HEADER */}
       <div className="relative text-white">
-        <div className="h-56 sm:h-72 md:h-80 w-full overflow-hidden relative bg-slate-900 shadow-inner">
-          <img
-            src={(society.cover_image || society.cover_photo) || "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=1600&auto=format&fit=crop&q=80"}
+        <div className="w-full overflow-hidden relative bg-slate-950 aspect-[2/1] sm:aspect-[21/9] md:aspect-[3/1] min-h-[160px]">
+          <MediaImage
+            src={getMediaUrl(society.cover_image || society.cover_photo) || "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=1600&auto=format&fit=crop&q=80"}
+            onError={(e) => { e.currentTarget.src = "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=1600&auto=format&fit=crop&q=80"; }}
             alt="Cover"
             className="w-full h-full object-cover object-center brightness-100 contrast-100"
           />
-          {/* Gentle baseline gradient to ensure text contrast without blurring any part of the cover */}
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent pointer-events-none"></div>
         </div>
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative -mt-16 sm:-mt-20 pb-8">
-          <div className="backdrop-blur-xl bg-slate-900/60 border border-white/20 rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col md:flex-row md:items-end justify-between gap-6">
-            <div className="flex flex-col sm:flex-row sm:items-end gap-5">
-              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl border-4 border-white/90 shadow-2xl overflow-hidden shrink-0 bg-white">
+        {/* Compact Glass Information Panel */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative mt-2 sm:-mt-6 md:-mt-10 pb-6">
+          <div className="bg-slate-900/90 supports-[backdrop-filter]:bg-slate-900/80 supports-[backdrop-filter]:backdrop-blur-[8px] border border-white/15 rounded-2xl p-4 sm:p-5 shadow-xl shadow-slate-950/20 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              {/* Compact Logo */}
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border-2 border-white/80 shadow-md overflow-hidden shrink-0 bg-white">
                 {society.logo ? (
-                  <img src={society.logo} alt={society.name} className="w-full h-full object-contain p-1" />
+                  <MediaImage
+                    src={getMediaUrl(society.logo)}
+                    onError={handleImageError}
+                    alt={society.name}
+                    className="w-full h-full object-contain p-1"
+                  />
                 ) : (
-                  <div className="w-full h-full bg-indigo-600 flex items-center justify-center text-3xl sm:text-4xl font-black text-white">
+                  <div className="w-full h-full bg-indigo-600 flex items-center justify-center text-2xl sm:text-3xl font-black text-white">
                     {society.name.substring(0, 2).toUpperCase()}
                   </div>
                 )}
@@ -420,155 +494,159 @@ const SocietyDetail = () => {
 
               <div>
                 <div className="flex items-center gap-2">
-                  <h1 className="text-2xl sm:text-4xl font-black text-white drop-shadow-md">{society.name}</h1>
-                  <span title="Verified University Society" className="p-1 text-emerald-400 bg-emerald-950/80 rounded-full border border-emerald-500/40">
-                    <ShieldCheck size={18} />
+                  <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight drop-shadow-sm">{society.name}</h1>
+                  <span title="Verified University Society" className="p-0.5 text-emerald-400 bg-emerald-950/80 rounded-full border border-emerald-500/40">
+                    <ShieldCheck size={16} />
                   </span>
                 </div>
-                <p className="text-sm text-indigo-100 font-medium mt-1 drop-shadow">
+                <p className="text-xs text-indigo-100/90 font-medium mt-0.5">
                   Departmental Chapter • Campus Leadership & Excellence
                 </p>
-                <div className="flex flex-wrap items-center gap-3 mt-3 text-xs text-slate-200 font-semibold">
-                  <span className="bg-black/35 px-3 py-1 rounded-xl border border-white/10">🏛️ Advisor: <strong className="text-white">{society.advisor_full_name || society.advisor_name || 'Dr. Alan Turing'}</strong></span>
-                  <span className="bg-black/35 px-3 py-1 rounded-xl border border-white/10">👑 President: <strong className="text-white">{society.president_full_name || society.president_name || 'Alice'}</strong></span>
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-2 text-[11px] text-slate-200 font-semibold">
+                  <span className="bg-black/40 px-2 py-0.5 rounded-lg border border-white/10 flex items-center gap-1">📍 Main Campus</span>
+                  <span className="bg-black/40 px-2 py-0.5 rounded-lg border border-white/10 flex items-center gap-1 max-w-full">🏛️ Advisor: <strong className="text-white truncate max-w-[140px] sm:max-w-none">{society.advisor_full_name || society.advisor_name || 'Dr. Alan Turing'}</strong></span>
+                  <span className="bg-black/40 px-2 py-0.5 rounded-lg border border-white/10 flex items-center gap-1 max-w-full">👑 Pres: <strong className="text-white truncate max-w-[140px] sm:max-w-none">{society.president_full_name || society.president_name || 'Alice'}</strong></span>
+                  {society.contact_email && (
+                    <span className="bg-black/40 px-2 py-0.5 rounded-lg border border-white/10 flex items-center gap-1 max-w-full truncate">✉️ {society.contact_email}</span>
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* ACTION BUTTONS & COMPREHENSIVE SOCIAL LINKS */}
-            <div className="flex flex-wrap items-center gap-2">
+            {/* ACTION BUTTONS & COMPACT WRAPPING SOCIAL LINKS */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-2 md:pt-0">
               {isSocietyManager && (
                 <>
                   <button
                     onClick={() => setShowProposeModal(true)}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/30 transition cursor-pointer"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1 shadow-sm transition cursor-pointer"
                   >
-                    <PlusCircle size={15} /> Propose Event
+                    <PlusCircle size={14} /> Propose Event
                   </button>
                   <button
                     onClick={() => setShowGalleryModal(true)}
-                    className="bg-white/15 hover:bg-white/25 text-white border border-white/20 px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                    className="bg-white/15 hover:bg-white/25 text-white border border-white/20 px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1 transition cursor-pointer"
                   >
-                    <ImageIcon size={15} /> Upload Photo
+                    <ImageIcon size={14} /> Upload Photo
                   </button>
                 </>
               )}
 
               <button
                 onClick={() => setIsFollowing(!isFollowing)}
-                className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1 transition cursor-pointer ${
                   isFollowing
                     ? 'bg-rose-50 text-rose-600 border border-rose-200'
                     : 'bg-white/10 hover:bg-white/20 text-white border border-white/20'
                 }`}
               >
-                <Heart size={15} fill={isFollowing ? 'currentColor' : 'none'} />
+                <Heart size={14} fill={isFollowing ? 'currentColor' : 'none'} />
                 {isFollowing ? 'Following' : 'Follow'}
               </button>
 
-              {/* Complete Social Links Badges */}
+              {/* Complete Social Links Badges (Compact & Wrap-Friendly) */}
               {society.social_links?.whatsapp && (
-                <a
+                <MediaLink
                   href={society.social_links.whatsapp}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition flex items-center gap-1.5 shadow-sm text-xs font-bold"
+                  className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition flex items-center gap-1 shadow-xs text-xs font-semibold"
                   title="Official WhatsApp Community / Group"
                 >
-                  <WhatsAppIcon size={15} />
-                  <span className="hidden sm:inline">WhatsApp Group</span>
-                </a>
+                  <WhatsAppIcon size={14} />
+                  <span className="hidden sm:inline">WhatsApp</span>
+                </MediaLink>
               )}
 
               {society.social_links?.whatsapp_channel && (
-                <a
+                <MediaLink
                   href={society.social_links.whatsapp_channel}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-3 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl transition flex items-center gap-1.5 shadow-sm text-xs font-bold"
+                  className="px-2.5 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded-lg transition flex items-center gap-1 shadow-xs text-xs font-semibold"
                   title="Official WhatsApp Channel Broadcast"
                 >
-                  <WhatsAppChannelIcon size={15} />
+                  <WhatsAppChannelIcon size={14} />
                   <span className="hidden sm:inline">Channel</span>
-                </a>
+                </MediaLink>
               )}
 
               {society.social_links?.facebook && (
-                <a
+                <MediaLink
                   href={society.social_links.facebook}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition flex items-center gap-1.5 shadow-sm text-xs font-bold"
+                  className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition flex items-center gap-1 shadow-xs text-xs font-semibold"
                   title="Facebook Official Page"
                 >
-                  <FacebookIcon size={15} />
+                  <FacebookIcon size={14} />
                   <span className="hidden sm:inline">Facebook</span>
-                </a>
+                </MediaLink>
               )}
 
               {society.social_links?.website && (
-                <a
+                <MediaLink
                   href={society.social_links.website}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition flex items-center gap-1.5 shadow-sm text-xs font-bold"
+                  className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition flex items-center gap-1 shadow-xs text-xs font-semibold"
                   title="Official Website"
                 >
-                  <Globe size={15} />
+                  <Globe size={14} />
                   <span className="hidden sm:inline">Website</span>
-                </a>
+                </MediaLink>
               )}
 
               {society.social_links?.youtube && (
-                <a
+                <MediaLink
                   href={society.social_links.youtube}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-3 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl transition flex items-center gap-1.5 shadow-sm text-xs font-bold"
+                  className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg transition flex items-center gap-1 shadow-xs text-xs font-semibold"
                   title="YouTube Channel"
                 >
-                  <YoutubeIcon size={15} />
+                  <YoutubeIcon size={14} />
                   <span className="hidden sm:inline">YouTube</span>
-                </a>
+                </MediaLink>
               )}
 
               {society.social_links?.instagram && (
-                <a
+                <MediaLink
                   href={society.social_links.instagram}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-3 py-2 bg-gradient-to-r from-amber-600 via-rose-600 to-purple-600 hover:opacity-95 text-white rounded-xl transition flex items-center gap-1.5 shadow-sm text-xs font-bold"
+                  className="px-2.5 py-1.5 bg-gradient-to-r from-amber-600 via-rose-600 to-purple-600 hover:opacity-95 text-white rounded-lg transition flex items-center gap-1 shadow-xs text-xs font-semibold"
                   title="Instagram Page"
                 >
-                  <InstagramIcon size={15} />
+                  <InstagramIcon size={14} />
                   <span className="hidden sm:inline">Instagram</span>
-                </a>
+                </MediaLink>
               )}
 
               {society.social_links?.linkedin && (
-                <a
+                <MediaLink
                   href={society.social_links.linkedin}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-3 py-2 bg-sky-700 hover:bg-sky-600 text-white rounded-xl transition flex items-center gap-1.5 shadow-sm text-xs font-bold"
+                  className="px-2.5 py-1.5 bg-sky-700 hover:bg-sky-600 text-white rounded-lg transition flex items-center gap-1 shadow-xs text-xs font-semibold"
                   title="LinkedIn Organization"
                 >
-                  <LinkedinIcon size={15} />
+                  <LinkedinIcon size={14} />
                   <span className="hidden sm:inline">LinkedIn</span>
-                </a>
+                </MediaLink>
               )}
 
               {society.social_links?.twitter && (
-                <a
+                <MediaLink
                   href={society.social_links.twitter}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl transition flex items-center gap-1.5 shadow-sm text-xs font-bold"
+                  className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition flex items-center gap-1 shadow-xs text-xs font-semibold"
                   title="Twitter / X"
                 >
-                  <TwitterIcon size={14} />
+                  <TwitterIcon size={13} />
                   <span className="hidden sm:inline">X</span>
-                </a>
+                </MediaLink>
               )}
             </div>
           </div>
@@ -600,7 +678,7 @@ const SocietyDetail = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex space-x-2 overflow-x-auto py-2.5">
           {[
             { id: 'overview', label: 'About & Overview' },
-            { id: 'team', label: `Team Structure (${cabinet.length + 2})` },
+            { id: 'team', label: `Team Structure (${totalTeamCount})` },
             { id: 'events', label: `Active Events (${upcomingEvents.length})` },
             { id: 'membership', label: myMembership ? `✅ Membership (${myMembership.status})` : `🪪 Join Membership` },
             { id: 'recruitment', label: `🎯 Recruitment (${openRecruitments.length})` },
@@ -654,7 +732,7 @@ const SocietyDetail = () => {
               <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm flex items-start gap-5">
                 <div className="w-14 h-14 rounded-2xl overflow-hidden bg-emerald-50 border border-emerald-200 text-emerald-600 shrink-0 flex items-center justify-center shadow-xs">
                   {(society.advisor_avatar_url || society.advisor_profile_picture_url) ? (
-                    <img 
+                    <MediaImage 
                       src={formatAvatarUrl(society.advisor_avatar_url || society.advisor_profile_picture_url)} 
                       alt={society.advisor_full_name || society.advisor_name || 'Faculty Advisor'} 
                       className="w-full h-full object-cover"
@@ -694,9 +772,27 @@ const SocietyDetail = () => {
                     <span className="text-slate-400 font-bold">Total Events</span>
                     <span className="font-bold text-slate-800">{events.length} Completed</span>
                   </div>
-                  <div className="flex justify-between py-2 border-b border-slate-100">
-                    <span className="text-slate-400 font-bold">Status</span>
-                    <span className="text-emerald-600 font-bold">Recognized Chapter</span>
+                  <div className="flex justify-between py-2 border-b border-slate-100 items-center">
+                    <span className="text-slate-400 font-bold">Campus Accreditation</span>
+                    <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 text-[11px] font-black px-2.5 py-0.5 rounded-full">
+                      ✓ Recognized Chapter
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-2 border-b border-slate-100 items-center">
+                    <span className="text-slate-400 font-bold">Your Membership</span>
+                    {myMembership?.status === 'active' ? (
+                      <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 text-[11px] font-black px-2.5 py-0.5 rounded-full">
+                        ✓ Enrolled Member
+                      </span>
+                    ) : myMembership?.status === 'pending' ? (
+                      <span className="text-amber-700 bg-amber-50 border border-amber-200 text-[11px] font-black px-2.5 py-0.5 rounded-full">
+                        ⏳ Verification Pending
+                      </span>
+                    ) : (
+                      <span className="text-slate-500 bg-slate-100 text-[11px] font-bold px-2.5 py-0.5 rounded-full">
+                        Not Enrolled
+                      </span>
+                    )}
                   </div>
                   <div className="py-2 border-b border-slate-100">
                     <span className="text-slate-400 font-bold block mb-1">Official Bank Account</span>
@@ -730,7 +826,7 @@ const SocietyDetail = () => {
               <div className="bg-white rounded-3xl p-6 border-2 border-indigo-100 shadow-sm flex items-center gap-4">
                 <div className="w-16 h-16 rounded-2xl overflow-hidden bg-indigo-50 border border-indigo-200 shrink-0 flex items-center justify-center shadow-xs">
                   {(society.advisor_avatar_url || society.advisor_profile_picture_url) ? (
-                    <img 
+                    <MediaImage 
                       src={formatAvatarUrl(society.advisor_avatar_url || society.advisor_profile_picture_url)} 
                       alt={society.advisor_full_name || society.advisor_name || 'Faculty Advisor'} 
                       className="w-full h-full object-cover"
@@ -743,7 +839,7 @@ const SocietyDetail = () => {
                   )}
                 </div>
                 <div>
-                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-full">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-100">
                     Faculty Advisor
                   </span>
                   <h4 className="font-black text-slate-900 text-lg mt-1">
@@ -759,7 +855,7 @@ const SocietyDetail = () => {
               <div className="bg-white rounded-3xl p-6 border-2 border-purple-100 shadow-sm flex items-center gap-4">
                 <div className="w-16 h-16 rounded-2xl overflow-hidden bg-purple-50 border border-purple-200 shrink-0 flex items-center justify-center shadow-xs">
                   {(society.president_avatar_url || society.president_profile_picture_url) ? (
-                    <img 
+                    <MediaImage 
                       src={formatAvatarUrl(society.president_avatar_url || society.president_profile_picture_url)} 
                       alt={society.president_full_name || society.president_name || 'Society President'} 
                       className="w-full h-full object-cover"
@@ -783,32 +879,32 @@ const SocietyDetail = () => {
               </div>
             </div>
 
-            {/* EXECUTIVE BODY / CABINET MEMBERS */}
+            {/* EXECUTIVE BODY / CABINET MEMBERS - AUTOMATICALLY SORTED STRICTLY BY HIERARCHY */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="text-lg font-black text-slate-900">Executive Cabinet & Board ({cabinet.length})</h4>
+                  <h4 className="text-lg font-black text-slate-900">Executive Cabinet & Board ({displayedCabinet.length})</h4>
                   <p className="text-xs text-slate-500">
                     {user && ['president','faculty','admin'].includes(user.role)
                       ? 'Click any member card to view their complete profile.'
-                      : 'Society cabinet members for the current academic session.'}
+                      : 'Society cabinet members arranged in institutional hierarchy order.'}
                   </p>
                 </div>
               </div>
 
-              {cabinet.length === 0 ? (
+              {displayedCabinet.length === 0 ? (
                 <div className="bg-white rounded-3xl p-8 text-center border border-slate-200 text-slate-400 text-xs">
                   Executive cabinet appointments are currently open under the recruitment tab.
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {cabinet.map(m => {
+                  {displayedCabinet.map(m => {
                     const canViewFull = user && ['president','faculty','admin'].includes(user.role);
                     return (
                       <div
                         key={m.id}
                         onClick={() => canViewFull && setSelectedCabinetStudent(m)}
-                        className={`bg-white rounded-3xl p-5 border border-slate-200 transition text-center group relative overflow-hidden ${
+                        className={`bg-white rounded-3xl p-5 border border-slate-200 transition text-center group relative overflow-hidden flex flex-col justify-between ${
                           canViewFull ? 'hover:border-indigo-400 hover:shadow-xl cursor-pointer' : 'cursor-default'
                         }`}
                       >
@@ -817,31 +913,34 @@ const SocietyDetail = () => {
                             View Profile ↗
                           </div>
                         )}
-                        {/* Profile Avatar */}
-                        <div className="w-16 h-16 rounded-2xl overflow-hidden mx-auto mb-3 shadow-md group-hover:scale-105 transition bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center">
-                          {m.avatar_url ? (
-                            <img src={formatAvatarUrl(m.avatar_url)} alt={m.full_name || m.username} className="w-full h-full object-cover" />
+                        <div>
+                          {/* Profile Avatar */}
+                          <div className="w-16 h-16 rounded-2xl overflow-hidden mx-auto mb-3 shadow-md group-hover:scale-105 transition bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center">
+                            {m.avatar_url ? (
+                              <MediaImage src={formatAvatarUrl(m.avatar_url)} alt={m.full_name || m.username} className="w-full h-full object-cover" />
+                            ) : (
+                              <span className="text-white font-black text-xl">{(m.full_name || m.username || 'U')[0].toUpperCase()}</span>
+                            )}
+                          </div>
+                          <h5 className="font-black text-slate-900 text-sm group-hover:text-indigo-600 transition">{m.full_name || m.username}</h5>
+                          <span className="text-xs font-bold text-indigo-600 block mt-0.5">{m.role_title}</span>
+                          {/* ALWAYS VISIBLE: partial info */}
+                          <span className="text-[11px] font-mono text-slate-500 block mt-1 font-bold">
+                            {m.roll_number ? `Roll: ${m.roll_number}` : `Session: ${m.term_year || '2026-2027'}`}
+                          </span>
+                          {m.department && <span className="text-[10px] text-slate-400 block">{m.department}</span>}
+                          {m.semester && <span className="text-[10px] text-slate-400 block">Semester {m.semester}</span>}
+                        </div>
+                        {/* RESTRICTED: only for leadership */}
+                        <div className="mt-3">
+                          {canViewFull ? (
+                            <div className="pt-2 border-t border-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-400 group-hover:text-indigo-600">
+                              <span>Click to view full record</span>
+                            </div>
                           ) : (
-                            <span className="text-white font-black text-xl">{(m.full_name || m.username || 'U')[0].toUpperCase()}</span>
+                            <div className="pt-2 text-[10px] text-slate-300 font-medium">🔒 Protected</div>
                           )}
                         </div>
-                        <h5 className="font-black text-slate-900 text-sm group-hover:text-indigo-600 transition">{m.full_name || m.username}</h5>
-                        <span className="text-xs font-bold text-indigo-600 block mt-0.5">{m.role_title}</span>
-                        {/* ALWAYS VISIBLE: partial info */}
-                        <span className="text-[11px] font-mono text-slate-500 block mt-1 font-bold">
-                          {m.roll_number ? `Roll: ${m.roll_number}` : `Session: ${m.term_year || '2026-2027'}`}
-                        </span>
-                        {m.department && <span className="text-[10px] text-slate-400 block">{m.department}</span>}
-                        {m.semester && <span className="text-[10px] text-slate-400 block">Semester {m.semester}</span>}
-                        {/* RESTRICTED: only for leadership */}
-                        {canViewFull && (
-                          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-400 group-hover:text-indigo-600">
-                            <span>Click to view full record</span>
-                          </div>
-                        )}
-                        {!canViewFull && (
-                          <div className="mt-2 text-[10px] text-slate-300 font-medium">🔒 Protected</div>
-                        )}
                       </div>
                     );
                   })}
@@ -879,11 +978,11 @@ const SocietyDetail = () => {
                 {upcomingEvents.map(e => (
                   <div key={e.id} className="bg-white rounded-3xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-md transition flex flex-col justify-between group">
                     {/* Replace the static crowd image with the dynamic URL */}
-                    <div className="w-full h-40 bg-gray-200 relative overflow-hidden">
-                      <img 
+                    <div className="w-full aspect-[16/9] sm:aspect-[2/1] md:aspect-[16/9] bg-gray-200 relative overflow-hidden">
+                      <MediaImage 
                         src={e.poster_image_url || e.image || '/default-placeholder.jpg'} 
                         alt={e.title} 
-                        className="w-full h-full object-cover rounded-t-xl group-hover:scale-105 transition duration-300"
+                        className="w-full h-full object-cover object-center rounded-t-xl group-hover:scale-105 transition duration-300"
                         onError={(ev) => {
                           ev.target.src = '/default-placeholder.jpg';
                         }}
@@ -891,7 +990,12 @@ const SocietyDetail = () => {
                       {/* The Society Badge and Free Entry pill sit on top of this */}
                       <div className="absolute top-3 left-3 bg-black/50 backdrop-blur-sm text-white text-xs px-2 py-1 rounded flex items-center gap-2">
                         {society.logo ? (
-                          <img src={society.logo} className="w-4 h-4 rounded-full object-cover" alt="" />
+                          <MediaImage
+                            src={getMediaUrl(society.logo)}
+                            onError={handleImageError}
+                            className="w-4 h-4 rounded-full object-cover"
+                            alt=""
+                          />
                         ) : null}
                         <span>{society.name}</span>
                       </div>
@@ -935,7 +1039,7 @@ const SocietyDetail = () => {
                 {pastEvents.map(e => (
                   <div key={e.id} className="bg-white rounded-3xl overflow-hidden border border-slate-200 shadow-sm opacity-85 hover:opacity-100 transition flex flex-col justify-between">
                     <div className="w-full h-36 relative bg-slate-800 overflow-hidden">
-                      <img 
+                      <MediaImage 
                         src={e.image || e.banner || 'https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&w=800&q=80'} 
                         alt={e.title}
                         className="w-full h-full object-cover filter grayscale contrast-125"
@@ -965,7 +1069,12 @@ const SocietyDetail = () => {
               </div>
               {society.logo && (
                 <div className="w-14 h-14 rounded-2xl overflow-hidden shrink-0 border border-slate-200 shadow-sm">
-                  <img src={society.logo} alt={society.name} className="w-full h-full object-cover" />
+                  <MediaImage
+                    src={getMediaUrl(society.logo)}
+                    onError={handleImageError}
+                    alt={society.name}
+                    className="w-full h-full object-cover"
+                  />
                 </div>
               )}
             </div>
@@ -1112,7 +1221,12 @@ const SocietyDetail = () => {
               </div>
               {society.logo && (
                 <div className="w-14 h-14 rounded-2xl overflow-hidden shrink-0 border border-slate-200 shadow-sm">
-                  <img src={society.logo} alt={society.name} className="w-full h-full object-cover" />
+                  <MediaImage
+                    src={getMediaUrl(society.logo)}
+                    onError={handleImageError}
+                    alt={society.name}
+                    className="w-full h-full object-cover"
+                  />
                 </div>
               )}
             </div>
@@ -1166,20 +1280,30 @@ const SocietyDetail = () => {
                                       <p className="text-[10px] text-indigo-600 font-bold mt-1">{pos.questions.length} question{pos.questions.length !== 1 ? 's' : ''} required</p>
                                     )}
                                   </div>
-                                  {rec.status === 'open' && !isPast && user && user.role === 'student' && (
-                                    <button
-                                      onClick={() => {
-                                        setActiveRecruitment(rec);
-                                        setSelectedPosition(pos);
-                                        const initialAnswers = {};
-                                        (pos.questions || []).forEach((q, qi) => { initialAnswers[qi] = ''; });
-                                        setApplyAnswers(initialAnswers);
-                                        setApplyStep(2);
-                                      }}
-                                      className="shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap"
-                                    >
-                                      Apply →
-                                    </button>
+                                  {rec.status === 'open' && !isPast && (
+                                    !user ? (
+                                      <Link
+                                        to="/login"
+                                        state={{ from: `/societies/${id}` }}
+                                        className="shrink-0 bg-slate-900 hover:bg-indigo-600 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap"
+                                      >
+                                        Sign In to Apply
+                                      </Link>
+                                    ) : user.role === 'student' ? (
+                                      <button
+                                        onClick={() => {
+                                          setActiveRecruitment(rec);
+                                          setSelectedPosition(pos);
+                                          const initialAnswers = {};
+                                          (pos.questions || []).forEach((q, qi) => { initialAnswers[qi] = ''; });
+                                          setApplyAnswers(initialAnswers);
+                                          setApplyStep(2);
+                                        }}
+                                        className="shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap"
+                                      >
+                                        Apply →
+                                      </button>
+                                    ) : null
                                   )}
                                 </div>
                               </div>
@@ -1238,7 +1362,7 @@ const SocietyDetail = () => {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {galleries.map((img, i) => (
                   <div key={i} className="h-56 rounded-2xl overflow-hidden shadow-sm bg-slate-100 relative group">
-                    <img
+                    <MediaImage
                       src={img.image_url || img.image || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800&auto=format&fit=crop&q=60'}
                       alt="Gallery"
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
@@ -1266,7 +1390,12 @@ const SocietyDetail = () => {
             <div className="flex items-center gap-2">
               {society.logo && (
                 <div className="w-8 h-8 rounded-lg overflow-hidden shadow-sm shrink-0">
-                  <img src={society.logo} alt={society.name} className="w-full h-full object-cover" />
+                  <MediaImage
+                    src={getMediaUrl(society.logo)}
+                    onError={handleImageError}
+                    alt={society.name}
+                    className="w-full h-full object-cover"
+                  />
                 </div>
               )}
               <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">
@@ -1409,7 +1538,12 @@ const SocietyDetail = () => {
 
                         {society.payment_qr_url || society.payment_qr ? (
                           <div className="w-28 h-28 flex-shrink-0 border border-gray-200 p-2 rounded-xl bg-white flex items-center justify-center">
-                            <img src={society.payment_qr_url || society.payment_qr} alt="Bank QR" className="w-full h-full object-contain" />
+                            <MediaImage
+                              src={getMediaUrl(society.payment_qr_url || society.payment_qr)}
+                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                              alt="Bank QR"
+                              className="w-full h-full object-contain"
+                            />
                           </div>
                         ) : (
                           <div className="flex flex-col items-center justify-center p-3 bg-white rounded-2xl text-slate-900">
@@ -1669,7 +1803,12 @@ const SocietyDetail = () => {
             <div className="flex items-center gap-3 mb-1">
               {society.logo && (
                 <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0 border border-slate-200 shadow-sm">
-                  <img src={society.logo} alt={society.name} className="w-full h-full object-cover" />
+                  <MediaImage
+                    src={getMediaUrl(society.logo)}
+                    onError={handleImageError}
+                    alt={society.name}
+                    className="w-full h-full object-cover"
+                  />
                 </div>
               )}
               <div>
@@ -1797,7 +1936,12 @@ const SocietyDetail = () => {
               
               <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-white p-1 overflow-hidden flex items-center justify-center border border-white/20 shadow-inner">
                 {society.logo ? (
-                  <img src={formatAvatarUrl(society.logo)} className="w-full h-full object-cover rounded-full" alt="Society Logo" />
+                  <MediaImage
+                    src={getMediaUrl(society.logo)}
+                    onError={handleImageError}
+                    className="w-full h-full object-cover rounded-full"
+                    alt="Society Logo"
+                  />
                 ) : (
                   <span className="text-xl font-black text-slate-800">{society.name?.charAt(0) || 'S'}</span>
                 )}
@@ -1813,7 +1957,30 @@ const SocietyDetail = () => {
 
             {/* Form Body */}
             <div className="p-6 overflow-y-auto">
-              {applySuccess ? (
+              {!user ? (
+                <div className="my-4 p-6 bg-slate-50 border border-slate-200 text-slate-800 rounded-2xl text-center space-y-3">
+                  <ShieldCheck className="mx-auto text-indigo-600 mb-2" size={40} />
+                  <h4 className="font-bold text-lg">Student Login Required</h4>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    You must be signed in with an active university student account to apply for recruitment positions.
+                  </p>
+                  <Link
+                    to="/login"
+                    state={{ from: `/societies/${id}` }}
+                    className="inline-block px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md transition"
+                  >
+                    Sign In to Apply
+                  </Link>
+                </div>
+              ) : user.role !== 'student' ? (
+                <div className="my-4 p-6 bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl text-center space-y-2">
+                  <AlertTriangle className="mx-auto text-amber-600 mb-2" size={36} />
+                  <h4 className="font-bold text-base">Student Account Required</h4>
+                  <p className="text-xs text-amber-700 max-w-sm mx-auto">
+                    Only enrolled students can apply for open society recruitment drives. Management accounts can view applicants in the dashboard.
+                  </p>
+                </div>
+              ) : applySuccess ? (
                 <div className="my-4 p-6 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-center">
                   <CheckCircle2 className="mx-auto text-emerald-500 mb-3" size={48} />
                   <h4 className="font-bold text-lg">Application Submitted!</h4>
@@ -2006,7 +2173,7 @@ const SocietyDetail = () => {
             <div className="flex items-center gap-4">
               <div className="w-16 h-16 rounded-2xl overflow-hidden bg-gradient-to-tr from-indigo-600 via-violet-600 to-purple-600 text-white font-black text-2xl flex items-center justify-center shadow-lg shrink-0">
                 {selectedCabinetStudent.avatar_url ? (
-                  <img src={selectedCabinetStudent.avatar_url} alt={selectedCabinetStudent.full_name || selectedCabinetStudent.username} className="w-full h-full object-cover" />
+                  <MediaImage src={selectedCabinetStudent.avatar_url} alt={selectedCabinetStudent.full_name || selectedCabinetStudent.username} className="w-full h-full object-cover" />
                 ) : (
                   (selectedCabinetStudent.full_name || selectedCabinetStudent.username || 'S')[0].toUpperCase()
                 )}

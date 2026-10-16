@@ -1,3 +1,4 @@
+import { MediaLink } from '../common/AuthenticatedMedia';
 import React, { useState, useEffect } from 'react';
 import api from '../../utils/api';
 import { Ticket, Users, CheckCircle2, XCircle, FileText, Loader2 } from 'lucide-react';
@@ -190,14 +191,14 @@ const PaymentVerificationDesk = ({ events = [] }) => {
                       <td className="p-3 font-mono text-xs text-gray-700">{slip.transaction_id || 'N/A'}</td>
                       <td className="p-3">
                         {slip.receipt_file && slip.receipt_file !== '#' ? (
-                          <a 
+                          <MediaLink 
                             href={getMediaUrl(slip.receipt_file)} 
                             target="_blank" 
                             rel="noopener noreferrer"
                             className="text-purple-600 font-bold hover:underline text-xs inline-flex items-center gap-1 bg-purple-50 hover:bg-purple-100 px-2.5 py-1 rounded-lg border border-purple-200 transition"
                           >
                             <FileText size={12} /> View File
-                          </a>
+                          </MediaLink>
                         ) : (
                           <span className="text-xs text-gray-400 italic">No file</span>
                         )}
@@ -270,14 +271,14 @@ const PaymentVerificationDesk = ({ events = [] }) => {
                       </td>
                       <td className="p-3">
                         {proofUrl ? (
-                          <a 
+                          <MediaLink 
                             href={getMediaUrl(proofUrl)} 
                             target="_blank" 
                             rel="noopener noreferrer"
                             className="text-purple-600 font-bold hover:underline text-xs inline-flex items-center gap-1 bg-purple-50 hover:bg-purple-100 px-2.5 py-1 rounded-lg border border-purple-200 transition"
                           >
                             <FileText size={12} /> View Slip
-                          </a>
+                          </MediaLink>
                         ) : (
                           <span className="text-xs text-gray-400 italic">No receipt file</span>
                         )}

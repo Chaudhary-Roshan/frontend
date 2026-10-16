@@ -1,3 +1,4 @@
+import { clickMediaDownload, MediaImage, MediaLink } from '../../components/common/AuthenticatedMedia';
 import React, { useContext, useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { AuthContext } from '../../context/AuthContext';
@@ -10,15 +11,22 @@ import {
   Shield, Check, FileText, Building, Download, UploadCloud,
   Printer, ArrowUpRight, ArrowDownRight, Tag, X, UserMinus,
   Sparkles, Mail, Phone, MapPin, Eye, FileCheck, Layers,
-  Folder, FolderOpen, ArrowLeft, Lock
+  Folder, FolderOpen, ArrowLeft, Lock, XCircle, User,
+  Trash2, Loader2
 } from 'lucide-react';
 import api from '../../utils/api';
+import { getMediaUrl, handleImageError, DEFAULT_SOCIETY_LOGO } from '../../utils/media';
 import ImageUploader from '../../components/common/ImageUploader';
 import EventProposalDocumentModal from '../../components/modals/EventProposalDocumentModal';
+import { generateOfficialProposalPDF } from '../../utils/officialPdfGenerator';
 import CreateProposalModal from '../../components/modals/CreateProposalModal';
+import ExecutiveProfileModal from '../../components/modals/ExecutiveProfileModal';
 import PaymentVerificationDesk from '../../components/ticketing/PaymentVerificationDesk';
 import ManualTicketingHub from '../../components/ticketing/ManualTicketingHub';
 import MembershipConfiguration from '../../components/membership/MembershipConfiguration';
+import { sortSocietyMembers, ROLE_TIER_CATEGORIES, getDynamicRoleRank } from '../../utils/hierarchy';
+import EditAdvertisementModal from '../../components/modals/EditAdvertisementModal';
+import { IUBLogoEmblem, getSocietyCertificateTheme } from '../../utils/societyCertificateThemes';
 
 const InstagramIcon = () => (
   <svg className="w-3.5 h-3.5 text-pink-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -82,6 +90,7 @@ const PresidentDashboard = () => {
   const [lockedDates, setLockedDates] = useState([]);
   const [registrations, setRegistrations] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showProfileModal, setShowProfileModal] = useState(false);
 
   // Bulk Operations State
   const [bulkEventId, setBulkEventId] = useState('');
@@ -228,7 +237,8 @@ const PresidentDashboard = () => {
   const [selectedCabinetStudent, setSelectedCabinetStudent] = useState(null);
   const [newCabinetForm, setNewCabinetForm] = useState({
     student_username: '',
-    role_title: 'Vice President',
+    role_title: 'Vice President - Operations',
+    priority_rank: 200,
     term_year: '2026-2027'
   });
   const [isCustomCabinetRole, setIsCustomCabinetRole] = useState(false);
@@ -264,22 +274,47 @@ const PresidentDashboard = () => {
   });
 
   const [toastMsg, setToastMsg] = useState(null);
+  const [deleteEventTarget, setDeleteEventTarget] = useState(null);
+  const [isDeletingEvent, setIsDeletingEvent] = useState(false);
+  const [deleteProposalTarget, setDeleteProposalTarget] = useState(null);
+  const [isDeletingProposal, setIsDeletingProposal] = useState(false);
 
-  useEffect(() => {
-    fetchPresidentData();
-    fetchLockedDates();
+  const isFetchingPresidentRef = useRef(false);
 
-    const handleSync = () => {
-      fetchPresidentData();
-    };
+  const handleDeleteEvent = async () => {
+    if (!deleteEventTarget) return;
+    try {
+      setIsDeletingEvent(true);
+      await api.delete(`events/${deleteEventTarget.id}/`);
+      setEvents(prev => prev.filter(e => e.id !== deleteEventTarget.id));
+      setProposals(prev => prev.filter(p => p.event !== deleteEventTarget.id && p.proposal_no !== deleteEventTarget.proposal_doc_number));
+      showToast(`Event "${deleteEventTarget.title}" permanently deleted.`);
+      setDeleteEventTarget(null);
+    } catch (err) {
+      console.error("Delete event failed:", err);
+      showToast(err.response?.data?.error || err.response?.data?.detail || "Failed to delete event.", "error");
+    } finally {
+      setIsDeletingEvent(false);
+    }
+  };
 
-    window.addEventListener('dsms:society_updated', handleSync);
-    window.addEventListener('storage', handleSync);
-    return () => {
-      window.removeEventListener('dsms:society_updated', handleSync);
-      window.removeEventListener('storage', handleSync);
-    };
-  }, [user]);
+  const handleDeleteProposal = async () => {
+    if (!deleteProposalTarget) return;
+    try {
+      setIsDeletingProposal(true);
+      await api.delete(`proposals/${deleteProposalTarget.id}/`);
+      setProposals(prev => prev.filter(p => p.id !== deleteProposalTarget.id));
+      setEvents(prev => prev.filter(e => e.proposal_doc_number !== deleteProposalTarget.proposal_no));
+      showToast(`Proposal "${deleteProposalTarget.event_title || deleteProposalTarget.title}" deleted.`);
+      setDeleteProposalTarget(null);
+    } catch (err) {
+      console.error("Delete proposal failed:", err);
+      showToast(err.response?.data?.error || err.response?.data?.detail || "Failed to delete proposal.", "error");
+    } finally {
+      setIsDeletingProposal(false);
+    }
+  };
+
 
   const showToast = (msg, type = 'success') => {
     setToastMsg(typeof msg === 'object' && msg !== null ? msg : { text: msg, type });
@@ -306,6 +341,8 @@ const PresidentDashboard = () => {
   };
 
   const fetchPresidentData = async () => {
+    if (isFetchingPresidentRef.current) return;
+    isFetchingPresidentRef.current = true;
     setLoading(true);
     try {
       const [socRes, evRes, appRes, memRes, budRes, sponRes, galRes, cabRes, propRes, venRes, staffRes, certTmplRes, volHourRes, regRes] = await Promise.allSettled([
@@ -327,18 +364,38 @@ const PresidentDashboard = () => {
 
       let mySoc = null;
       if (socRes.status === 'fulfilled') {
-        mySoc = socRes.value.data.find(s => 
-          (user?.society && (s.id === user.society || s.id === Number(user.society))) || 
-          (s.president && (s.president === user?.id || s.president === Number(user?.id))) ||
-          (s.president_name && user?.username && s.president_name.toLowerCase() === user.username.toLowerCase())
-        ) || null;
+        const currentUserId = user?.id ? Number(user.id) : null;
+        const currentSocId = user?.society ? Number(typeof user.society === 'object' ? user.society.id : user.society) : null;
+        const presidedIds = (user?.presided_society_ids || []).map(Number);
+
+        mySoc = socRes.value.data.find(s => {
+          const sId = Number(s.id);
+          const sPresId = Number(typeof s.president === 'object' ? s.president?.id : s.president);
+          return (
+            (currentSocId && sId === currentSocId) ||
+            (currentUserId && sPresId === currentUserId) ||
+            (presidedIds.includes(sId)) ||
+            (s.president_name && user?.username && s.president_name.toLowerCase() === user.username.toLowerCase())
+          );
+        }) || null;
+
+        if (mySoc) {
+          try {
+            const freshSoc = await api.get(`societies/${mySoc.id}/`);
+            if (freshSoc?.data) {
+              mySoc = freshSoc.data;
+            }
+          } catch (e) {
+            console.warn("Using society from catalog list:", e);
+          }
+        }
         setSociety(mySoc);
 
         if (mySoc) {
           setSettingsForm({
             description: mySoc.description || '',
-            cover_image: mySoc.cover_image || 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=1600&q=80',
-            logo: mySoc.logo || 'https://images.unsplash.com/photo-1563986768609-322da13575f3?auto=format&fit=crop&w=400&q=80',
+            cover_image: mySoc.cover_image ? getMediaUrl(mySoc.cover_image) : 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=1600&q=80',
+            logo: mySoc.logo ? getMediaUrl(mySoc.logo) : 'https://images.unsplash.com/photo-1563986768609-322da13575f3?auto=format&fit=crop&w=400&q=80',
             vision: mySoc.vision || '',
             mission: mySoc.mission || '',
             contact_email: mySoc.contact_email || '',
@@ -381,6 +438,7 @@ const PresidentDashboard = () => {
       console.error(err);
     } finally {
       setLoading(false);
+      isFetchingPresidentRef.current = false;
     }
   };
 
@@ -390,6 +448,25 @@ const PresidentDashboard = () => {
       setLockedDates(res.data);
     } catch(e){}
   };
+
+  useEffect(() => {
+    fetchPresidentData();
+    fetchLockedDates();
+
+    const handleSync = () => {
+      fetchPresidentData();
+      fetchLockedDates();
+    };
+
+    window.addEventListener('dsms:society_updated', handleSync);
+    window.addEventListener('dsms:data_synced', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('dsms:society_updated', handleSync);
+      window.removeEventListener('dsms:data_synced', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
+  }, []);
 
   const checkDateConflict = (selectedDateStr) => {
     if (!selectedDateStr) {
@@ -408,12 +485,6 @@ const PresidentDashboard = () => {
   // ADVERTISE & PUBLISH MARKETING MATERIALS WORKFLOW
   const openAdvertiseModal = (evt) => {
     setAdvertiseTargetEvent(evt);
-    setAdvertiseCoverFile(null);
-    setAdvertiseCoverPreview(evt.poster_image_url || evt.image || '');
-    setAdvertiseGalleryFiles([]);
-    setAdvertiseGalleryPreviews(Array.isArray(evt.gallery_images) ? evt.gallery_images : []);
-    setAdvertiseDescription(evt.detailed_description || evt.description || '');
-    setAdvertiseError(null);
     setShowAdvertiseModal(true);
   };
 
@@ -453,9 +524,20 @@ const PresidentDashboard = () => {
       });
       const updatedEvent = res.data.event || res.data;
 
-      // Update state in events list
-      setEvents(prev => prev.map(ev => ev.id === advertiseTargetEvent.id ? { ...ev, ...updatedEvent, is_published: true } : ev));
-      showToast(`Event "${advertiseTargetEvent.title}" is now published and LIVE on the Student Portal! 🚀`);
+      // Update state in events list and proposals
+      setEvents(prev => {
+        const exists = prev.some(ev => ev.id === updatedEvent.id);
+        if (exists) {
+          return prev.map(ev => ev.id === updatedEvent.id ? { ...ev, ...updatedEvent, is_published: true } : ev);
+        }
+        return [{ ...updatedEvent, is_published: true }, ...prev];
+      });
+
+      if (advertiseTargetEvent.is_proposal) {
+        setProposals(prev => prev.map(p => p.id === advertiseTargetEvent.id ? { ...p, status: 'approved', is_published: true } : p));
+      }
+
+      showToast(`Event "${advertiseTargetEvent.title}" is now advertised with marketing photos and LIVE on the Student Portal! 🚀`);
       setShowAdvertiseModal(false);
       setAdvertiseTargetEvent(null);
       setAdvertiseCoverFile(null);
@@ -463,6 +545,11 @@ const PresidentDashboard = () => {
       setAdvertiseGalleryFiles([]);
       setAdvertiseGalleryPreviews([]);
       setAdvertiseDescription('');
+      
+      // Broadcast live sync across portals
+      window.dispatchEvent(new CustomEvent('dsms:data_synced'));
+      window.dispatchEvent(new CustomEvent('dsms:society_updated'));
+      setTimeout(() => fetchPresidentData(), 300);
     } catch (err) {
       console.error("Upload error details:", err.response);
       const errorMsg = err.response?.data?.message || err.response?.data?.error || err.response?.data?.detail || 'Server error';
@@ -574,21 +661,38 @@ const PresidentDashboard = () => {
       return;
     }
     try {
+      const finalRole = newCabinetForm.role_title;
+      const rank = Number(newCabinetForm.priority_rank) || getDynamicRoleRank({ role_title: finalRole });
       const res = await api.post('cabinet/', {
         student_username: (lookedUpStudent.username || lookedUpStudent.roll_number).trim(),
-        role_title: newCabinetForm.role_title,
+        role_title: finalRole,
+        priority_rank: rank,
         term_year: newCabinetForm.term_year,
         society: society.id
       });
-      setCabinet([...cabinet, res.data]);
-      setNewCabinetForm({ student_username: '', role_title: 'Vice President', term_year: '2026-2027' });
+      setCabinet(prev => sortSocietyMembers([...prev, res.data]));
+      setNewCabinetForm({ student_username: '', role_title: 'Vice President - Operations', priority_rank: 200, term_year: '2026-2027' });
       setIsCustomCabinetRole(false);
       setLookedUpStudent(null);
-      setRollNumberInput('');
-      setStudentLookupError(null);
-      showToast(`Inducted ${res.data.full_name || res.data.username} as ${res.data.role_title}!`);
+      showToast(res.data.is_verified 
+        ? `Inducted ${res.data.full_name || res.data.username} as ${res.data.role_title}!` 
+        : `Nomination submitted! ${res.data.full_name || res.data.username} will receive their Cabinet Card once verified by Faculty Advisor.`);
+      window.dispatchEvent(new CustomEvent('dsms:cabinet_updated', { detail: { id: society.id } }));
+      window.dispatchEvent(new CustomEvent('dsms:data_synced'));
     } catch (err) {
       alert(err.response?.data?.error || err.response?.data?.student_username || "Failed to add cabinet member.");
+    }
+  };
+
+  const handleToggleCabinetActive = async (id) => {
+    try {
+      const res = await api.post(`cabinet/${id}/toggle_active/`);
+      setCabinet(cabinet.map(c => c.id === id ? { ...c, is_active: res.data.is_active } : c));
+      showToast(`Cabinet assignment status updated to ${res.data.is_active ? 'Active' : 'Inactive'}. Preserved in history.`);
+      window.dispatchEvent(new CustomEvent('dsms:cabinet_updated', { detail: { id: society?.id } }));
+      window.dispatchEvent(new CustomEvent('dsms:data_synced'));
+    } catch (err) {
+      alert(err.response?.data?.error || "Failed to toggle cabinet member active status.");
     }
   };
 
@@ -598,6 +702,8 @@ const PresidentDashboard = () => {
       await api.delete(`cabinet/${id}/`);
       setCabinet(cabinet.filter(c => c.id !== id));
       showToast("Cabinet member removed.");
+      window.dispatchEvent(new CustomEvent('dsms:cabinet_updated', { detail: { id: society?.id } }));
+      window.dispatchEvent(new CustomEvent('dsms:data_synced'));
     } catch (err) {
       alert("Failed to remove member.");
     }
@@ -971,7 +1077,7 @@ const PresidentDashboard = () => {
   };
 
   // DOWNLOAD PHOTO HELPER FOR STUDENTS / VISITORS
-  const handleDownloadPhoto = (e, imgUrl, filename = 'event_photo.jpg') => {
+  const handleDownloadPhoto = async (e, imgUrl, filename = 'event_photo.jpg') => {
     e.stopPropagation();
     try {
       const link = document.createElement('a');
@@ -980,7 +1086,7 @@ const PresidentDashboard = () => {
       link.target = '_blank';
       link.rel = 'noreferrer';
       document.body.appendChild(link);
-      link.click();
+      await clickMediaDownload(link);
       document.body.removeChild(link);
       showToast("Photo download started!");
     } catch (err) {
@@ -1115,6 +1221,10 @@ const PresidentDashboard = () => {
   const netLedgerBalance = totalBudgetIncome + totalSponsorshipsAmount - totalBudgetExpense;
 
   const presidentDisplayName = user?.full_name || (user?.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : user?.username) || 'President';
+  const verifiedCabinet = sortSocietyMembers(cabinet.filter(c => c.is_active && c.is_verified));
+  const pendingCabinetNominations = sortSocietyMembers(cabinet.filter(c => c.is_active && !c.is_verified));
+  const activeCabinet = sortSocietyMembers(cabinet.filter(c => c.is_active));
+  const inactiveCabinet = sortSocietyMembers(cabinet.filter(c => !c.is_active));
 
   if (loading) {
     return (
@@ -1147,11 +1257,12 @@ const PresidentDashboard = () => {
         {/* 1. HIGH-IMPACT CLUB BRANDING HEADER BANNER - 50/50 Overlapping Layout */}
         <div className="w-full">
           {/* 1. Cover Image Section */}
-          <div className="w-full h-80 sm:h-96 md:h-[400px] relative rounded-t-2xl sm:rounded-t-3xl overflow-hidden">
-            <img
-              src={society?.cover_image || 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=1600&q=80'}
+          <div className="w-full aspect-[2/1] sm:aspect-[21/9] md:aspect-[3/1] min-h-[160px] relative rounded-t-2xl sm:rounded-t-3xl overflow-hidden">
+            <MediaImage
+              src={society?.cover_image ? getMediaUrl(society.cover_image) : 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=1600&q=80'}
+              onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=1600&q=80'; }}
               alt="Cover"
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover object-center"
             />
             {/* Quick Edit Banner Trigger */}
             {society && (
@@ -1169,14 +1280,15 @@ const PresidentDashboard = () => {
 
           {/* 2. Transparent Wrapper for the Details Card */}
           <div className="px-4 sm:px-6 bg-transparent">
-            {/* 3. The Details Card pulled up by 50% of its height (-mt-20) */}
-            <div className="relative z-10 -mt-20 bg-[#151B2B] rounded-2xl p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6 border border-gray-800">
+            {/* 3. The Details Card pulled up smoothly without crushing mobile banner */}
+            <div className="relative z-10 mt-2 sm:-mt-10 md:-mt-20 bg-[#151B2B] rounded-2xl p-4 sm:p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6 border border-gray-800">
               <div className="flex flex-col sm:flex-row sm:items-center gap-5">
                 {/* Club Logo Crest */}
                 <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-white p-1 shadow-lg shrink-0 overflow-hidden flex items-center justify-center">
-                  <img
-                    src={society?.logo || 'https://images.unsplash.com/photo-1563986768609-322da13575f3?auto=format&fit=crop&w=400&q=80'}
-                    alt="Club Logo"
+                  <MediaImage
+                    src={getMediaUrl(society?.logo) || DEFAULT_SOCIETY_LOGO}
+                    onError={handleImageError}
+                    alt={society?.name || "Club Logo"}
                     className="w-full h-full object-contain"
                   />
                 </div>
@@ -1197,49 +1309,71 @@ const PresidentDashboard = () => {
                     {society ? society.name : 'Unassigned Presidential Profile'}
                   </h1>
                   
-                  <p className="text-sm text-gray-300">
-                    President: {presidentDisplayName || 'Pending'} &nbsp;•&nbsp; Faculty Advisor: {society?.advisor_full_name || society?.advisor_name || 'Unassigned'}
-                  </p>
+                  <div className="flex items-center gap-2 pt-0.5">
+                    {user?.avatar_url || user?.profile_photo_url ? (
+                      <div className="w-6 h-6 rounded-full overflow-hidden border border-indigo-400/50 shrink-0">
+                        <MediaImage
+                          src={getMediaUrl(user.avatar_url || user.profile_photo_url)}
+                          alt={presidentDisplayName}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    ) : (
+                      <div className="w-6 h-6 rounded-full bg-indigo-600/50 flex items-center justify-center text-white text-[10px] font-bold shrink-0">
+                        {presidentDisplayName.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <p className="text-sm text-gray-300">
+                      President: <button type="button" onClick={() => setShowProfileModal(true)} className="text-white hover:text-indigo-300 font-bold underline-offset-2 hover:underline cursor-pointer transition">{presidentDisplayName || 'Pending'}</button> &nbsp;•&nbsp; Faculty Advisor: {society?.advisor_full_name || society?.advisor_name || 'Unassigned'}
+                    </p>
+                  </div>
 
                   {/* Social Badges in Header */}
                   <div className="flex flex-wrap items-center gap-2 pt-1">
                     {society?.social_links?.whatsapp && (
-                      <a href={society.social_links.whatsapp} target="_blank" rel="noreferrer" className="px-2.5 py-1 bg-emerald-600/90 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition" title="WhatsApp Group">
+                      <MediaLink href={society.social_links.whatsapp} target="_blank" rel="noreferrer" className="px-2.5 py-1 bg-emerald-600/90 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition" title="WhatsApp Group">
                         <WhatsAppIcon size={13} /> WhatsApp
-                      </a>
+                      </MediaLink>
                     )}
                     {society?.social_links?.whatsapp_channel && (
-                      <a href={society.social_links.whatsapp_channel} target="_blank" rel="noreferrer" className="px-2.5 py-1 bg-teal-600/90 hover:bg-teal-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition" title="WhatsApp Channel">
+                      <MediaLink href={society.social_links.whatsapp_channel} target="_blank" rel="noreferrer" className="px-2.5 py-1 bg-teal-600/90 hover:bg-teal-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition" title="WhatsApp Channel">
                         <WhatsAppChannelIcon size={13} /> Channel
-                      </a>
+                      </MediaLink>
                     )}
                     {society?.social_links?.facebook && (
-                      <a href={society.social_links.facebook} target="_blank" rel="noreferrer" className="px-2.5 py-1 bg-blue-600/90 hover:bg-blue-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition" title="Facebook Page">
+                      <MediaLink href={society.social_links.facebook} target="_blank" rel="noreferrer" className="px-2.5 py-1 bg-blue-600/90 hover:bg-blue-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition" title="Facebook Page">
                         <FacebookIcon size={13} /> Facebook
-                      </a>
+                      </MediaLink>
                     )}
                     {society?.social_links?.website && (
-                      <a href={society.social_links.website} target="_blank" rel="noreferrer" className="px-2.5 py-1 bg-indigo-600/90 hover:bg-indigo-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition" title="Official Website">
+                      <MediaLink href={society.social_links.website} target="_blank" rel="noreferrer" className="px-2.5 py-1 bg-indigo-600/90 hover:bg-indigo-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition" title="Official Website">
                         <Globe size={13} /> Website
-                      </a>
+                      </MediaLink>
                     )}
                     {society?.social_links?.instagram && (
-                      <a href={society.social_links.instagram} target="_blank" rel="noreferrer" className="px-2.5 py-1 bg-gradient-to-r from-amber-600 via-rose-600 to-purple-600 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition" title="Instagram">
+                      <MediaLink href={society.social_links.instagram} target="_blank" rel="noreferrer" className="px-2.5 py-1 bg-gradient-to-r from-amber-600 via-rose-600 to-purple-600 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition" title="Instagram">
                         <InstagramIcon /> Instagram
-                      </a>
+                      </MediaLink>
                     )}
                     {society?.social_links?.linkedin && (
-                      <a href={society.social_links.linkedin} target="_blank" rel="noreferrer" className="px-2.5 py-1 bg-sky-700/90 hover:bg-sky-600 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition" title="LinkedIn">
+                      <MediaLink href={society.social_links.linkedin} target="_blank" rel="noreferrer" className="px-2.5 py-1 bg-sky-700/90 hover:bg-sky-600 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition" title="LinkedIn">
                         <LinkedinIcon /> LinkedIn
-                      </a>
+                      </MediaLink>
                     )}
                   </div>
                 </div>
               </div>
 
-              {/* Action Buttons: Only Edit Club & Cabinet */}
-              {society && (
-                <div className="flex gap-3 shrink-0">
+              {/* Action Buttons: Edit Profile & Edit Club & Cabinet */}
+              <div className="flex flex-wrap items-center gap-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowProfileModal(true)}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-lg shadow-indigo-600/30"
+                >
+                  <User size={14} /> Edit President Profile
+                </button>
+                {society && (
                   <button
                     onClick={() => {
                       setClubEditTab('branding');
@@ -1249,10 +1383,8 @@ const PresidentDashboard = () => {
                   >
                     <Settings size={14} /> Edit Club & Cabinet
                   </button>
-                  {/* REMOVED: Propose Event button */}
-                  {/* REMOVED: Bulk Add Showcase Photos button */}
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -1292,7 +1424,7 @@ const PresidentDashboard = () => {
                   }}
                   className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer self-start md:self-auto"
                 >
-                  <Users size={14} /> Manage Cabinet & Roles ({cabinet.length})
+                  <Users size={14} /> Manage Cabinet & Roles ({activeCabinet.length})
                 </button>
               </div>
 
@@ -1319,10 +1451,10 @@ const PresidentDashboard = () => {
               {/* Cabinet Members Roster Pill Grid */}
               <div>
                 <span className="text-xs font-black uppercase text-slate-400 tracking-wider block mb-3">
-                  Current Executive Cabinet & Roster ({cabinet.length} Leaders)
+                  Current Executive Cabinet & Roster ({activeCabinet.length} Leaders)
                 </span>
 
-                {cabinet.length === 0 ? (
+                {activeCabinet.length === 0 ? (
                   <div className="p-4 bg-slate-50 border border-dashed border-slate-200 rounded-2xl text-center">
                     <p className="text-xs text-slate-500 font-medium">
                       No cabinet members assigned yet. Click <strong className="text-indigo-600 cursor-pointer" onClick={() => { setClubEditTab('cabinet'); setShowClubEditModal(true); }}>"Manage Cabinet & Roles"</strong> to induct your Vice President, Secretary, and Treasurer.
@@ -1330,7 +1462,7 @@ const PresidentDashboard = () => {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {cabinet.map((cab) => (
+                    {activeCabinet.map((cab) => (
                       <div key={cab.id} className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 flex items-center justify-between">
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs shrink-0">
@@ -1453,16 +1585,29 @@ const PresidentDashboard = () => {
 
                         {/* Statutory Action Buttons */}
                         <div className="flex flex-wrap items-center gap-2 shrink-0">
-                          {/* 1. VIEW & PRINT FORM */}
+                          {/* 1. 1-CLICK DIRECT VECTOR PDF DOWNLOAD */}
+                          <button
+                            onClick={() => {
+                              const safeNo = (prop.proposal_no || 'Dossier').replace(/[^a-zA-Z0-9_-]/g, '_');
+                              generateOfficialProposalPDF(prop, `Event_Proposal_${safeNo}.pdf`);
+                              showToast(`Official Event Proposal PDF downloaded successfully!`);
+                            }}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
+                            title="Download official PDF proposal dossier directly"
+                          >
+                            <Download size={14} /> Download PDF
+                          </button>
+
+                          {/* 2. VIEW FULL PROPOSAL DOSSIER */}
                           <button
                             onClick={() => setSelectedProposalDoc(prop)}
                             className="bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
-                            title="View official statutory proposal form and print PDF"
+                            title="View official statutory proposal form and details"
                           >
-                            <Printer size={14} className="text-indigo-600" /> Print / View PDF
+                            <Eye size={14} className="text-indigo-600" /> View Proposal
                           </button>
 
-                          {/* 2. UPLOAD SIGNED DOCUMENT / VERIFY */}
+                          {/* 3. UPLOAD SIGNED DOCUMENT / VERIFY */}
                           <button
                             onClick={() => setSelectedProposalDoc(prop)}
                             className={`${hasSignedDoc ? 'bg-emerald-50 text-emerald-800 border-emerald-300' : 'bg-indigo-600 text-white'} border px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer`}
@@ -1470,7 +1615,7 @@ const PresidentDashboard = () => {
                             <UploadCloud size={14} /> {hasSignedDoc ? 'Signed Doc Uploaded' : 'Upload Signed Scan'}
                           </button>
 
-                          {/* 3. AUDIT HISTORY */}
+                          {/* 4. AUDIT HISTORY */}
                           <button
                             onClick={() => setSelectedProposalDoc(prop)}
                             className="bg-slate-900 hover:bg-slate-800 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
@@ -1488,9 +1633,15 @@ const PresidentDashboard = () => {
                               <div className="flex items-center">
                                 {evt.status?.toUpperCase() === 'APPROVED' ? (
                                   evt.is_published ? (
-                                    <span className="bg-green-100 text-green-700 px-3.5 py-2 rounded-xl font-bold text-xs inline-flex items-center gap-1">
-                                      <CheckCircle2 size={13} /> Live on Student Portal
-                                    </span>
+                                    Boolean(evt.is_expired || (evt.date && new Date(evt.date) < new Date())) ? (
+                                      <span className="bg-rose-100 text-rose-700 border border-rose-200 px-3.5 py-2 rounded-xl font-bold text-xs inline-flex items-center gap-1">
+                                        <AlertCircle size={13} /> Concluded Ad
+                                      </span>
+                                    ) : (
+                                      <span className="bg-green-100 text-green-700 px-3.5 py-2 rounded-xl font-bold text-xs inline-flex items-center gap-1">
+                                        <CheckCircle2 size={13} /> Live on Student Portal
+                                      </span>
+                                    )
                                   ) : (
                                     <button 
                                       onClick={() => openAdvertiseModal(evt.id ? evt : { ...evt, id: prop.id, title: prop.title, description: prop.description, image: prop.image, is_proposal: true })}
@@ -1505,6 +1656,15 @@ const PresidentDashboard = () => {
                               </div>
                             );
                           })()}
+                          {/* 5. DELETE PROPOSAL */}
+                          <button
+                            type="button"
+                            onClick={() => setDeleteProposalTarget(prop)}
+                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-xl transition cursor-pointer"
+                            title="Delete Proposal"
+                          >
+                            <Trash2 size={14} />
+                          </button>
                         </div>
                       </div>
                     );
@@ -1547,7 +1707,7 @@ const PresidentDashboard = () => {
                       className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden flex flex-col justify-between hover:border-purple-300 transition"
                     >
                       <div className="h-44 bg-slate-900 relative overflow-hidden">
-                        <img 
+                        <MediaImage 
                           src={evt.poster_image_url || evt.image || '/default-placeholder.jpg'} 
                           alt={evt.title} 
                           className="w-full h-full object-cover"
@@ -1560,14 +1720,38 @@ const PresidentDashboard = () => {
                             {evt.status}
                           </span>
                         </div>
-                        <div className="absolute top-2.5 right-2.5">
+                        <div className="absolute top-2.5 right-2.5 flex flex-col items-end gap-1">
                           <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full shadow-md ${
                             evt.is_paid ? 'bg-purple-600 text-white' : 'bg-emerald-600 text-white'
                           }`}>
-                            {evt.is_paid ? `PKR ${evt.ticket_price || evt.price}` : 'Free Entry'}
+                            {evt.is_paid ? (
+                              (evt.has_discount || (evt.discount_price && Number(evt.discount_price) > 0 && Number(evt.discount_price) < Number(evt.price)))
+                                ? `PKR ${evt.discount_price} (was ${evt.ticket_price || evt.price})`
+                                : `PKR ${evt.ticket_price || evt.price}`
+                            ) : 'Free Entry'}
                           </span>
+                          {Array.isArray(evt.gallery_images) && evt.gallery_images.length > 0 && (
+                            <span className="bg-black/80 backdrop-blur-sm text-white text-[10px] font-black px-2 py-0.5 rounded-full border border-white/20 shadow">
+                              📷 {1 + evt.gallery_images.length} Photos
+                            </span>
+                          )}
                         </div>
                       </div>
+
+                      {/* Mini thumbnail strip previewing all uploaded pictures */}
+                      {Array.isArray(evt.gallery_images) && evt.gallery_images.length > 0 && (
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 border-b border-slate-200 overflow-x-auto">
+                          <span className="text-[10px] text-slate-500 font-bold shrink-0">Photos:</span>
+                          <div className="h-6 w-8 rounded overflow-hidden border border-indigo-500 shrink-0">
+                            <MediaImage src={evt.poster_image_url || evt.image} alt="Cover" className="w-full h-full object-cover" />
+                          </div>
+                          {evt.gallery_images.map((gImg, gIdx) => (
+                            <div key={gIdx} className="h-6 w-8 rounded overflow-hidden border border-slate-300 shrink-0">
+                              <MediaImage src={gImg} alt={`Gallery ${gIdx+1}`} className="w-full h-full object-cover" />
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                       <div className="p-4 space-y-2 flex-1 flex flex-col justify-between">
                         <div>
@@ -1585,13 +1769,29 @@ const PresidentDashboard = () => {
                         <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-2">
                           {evt.status?.toUpperCase() === 'APPROVED' ? (
                             evt.is_published ? (
-                              <span className="bg-green-100 text-green-700 px-4 py-2 rounded-lg font-bold text-xs inline-flex items-center gap-1.5">
-                                <CheckCircle2 size={15} /> Live on Student Portal
-                              </span>
+                              <div className="flex items-center gap-2">
+                                {Boolean(evt.is_expired || (evt.date && new Date(evt.date) < new Date())) ? (
+                                  <span className="bg-rose-100 text-rose-700 border border-rose-200 px-3 py-1.5 rounded-lg font-bold text-xs inline-flex items-center gap-1.5">
+                                    <AlertCircle size={14} /> Expired Ad (Concluded)
+                                  </span>
+                                ) : (
+                                  <span className="bg-green-100 text-green-700 px-3 py-1.5 rounded-lg font-bold text-xs inline-flex items-center gap-1.5">
+                                    <CheckCircle2 size={14} /> Live
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => openAdvertiseModal(evt)}
+                                  className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg font-bold text-xs shadow-md transition cursor-pointer flex items-center gap-1"
+                                >
+                                  <Edit3 size={12} /> Edit Ad
+                                </button>
+                              </div>
                             ) : (
                               <button 
+                                type="button"
                                 onClick={() => openAdvertiseModal(evt)}
-                                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg font-bold text-xs shadow-lg transition-all animate-pulse cursor-pointer flex items-center gap-1.5"
+                                className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2 rounded-lg font-bold text-xs shadow-lg transition-all animate-pulse cursor-pointer flex items-center gap-1.5"
                               >
                                 Advertise Event 🚀
                               </button>
@@ -1600,14 +1800,24 @@ const PresidentDashboard = () => {
                             <span className="text-gray-500 text-xs font-semibold">Awaiting Approval...</span>
                           )}
 
-                          {evt.is_published && (
-                            <Link 
-                              to={`/events/${evt.id}`}
-                              className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition"
+                          <div className="flex items-center gap-2">
+                            {evt.is_published && (
+                              <Link 
+                                to={`/events/${evt.id}`}
+                                className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition"
+                              >
+                                View Portal Page →
+                              </Link>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setDeleteEventTarget(evt)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                              title="Delete Event"
                             >
-                              View Portal Page →
-                            </Link>
-                          )}
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1742,13 +1952,16 @@ const PresidentDashboard = () => {
             </div>
 
             {/* 5. EVENT PHOTO SHOWCASE ORGANIZED BY FOLDERS */}
-            <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6 scroll-mt-24">
               {/* Header Bar */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
                 <div>
                   <div className="flex items-center gap-2">
-                    <Folder className="text-rose-600" size={22} />
-                    <h2 className="text-lg font-black text-slate-900">Event Photo Showcase (Album Folders & Downloads)</h2>
+                    <Folder className="text-rose-600 shrink-0" size={22} />
+                    <h2 className="text-base sm:text-lg font-black text-slate-900 flex flex-wrap items-center gap-1.5">
+                      <span>Event Photo Showcase</span>
+                      <span className="text-slate-500 font-bold text-xs sm:text-sm">— Album Folders & Downloads</span>
+                    </h2>
                   </div>
                   <p className="text-xs text-slate-500 font-medium mt-0.5">
                     Organized into dedicated event folders. Students and attendees can open folders to view and download high-resolution memories.
@@ -1816,13 +2029,13 @@ const PresidentDashboard = () => {
                         onClick={() => {
                           showToast(`Downloading all ${selectedShowcaseFolder.images.length} photos...`);
                           selectedShowcaseFolder.images.forEach((img, idx) => {
-                            setTimeout(() => {
+                            setTimeout(async () => {
                               const link = document.createElement('a');
                               link.href = img.image_url || img.image;
                               link.download = `${selectedShowcaseFolder.album_name.replace(/\s+/g, '_')}_${idx + 1}.jpg`;
                               link.target = '_blank';
                               document.body.appendChild(link);
-                              link.click();
+                              await clickMediaDownload(link);
                               document.body.removeChild(link);
                             }, idx * 300);
                           });
@@ -1840,7 +2053,7 @@ const PresidentDashboard = () => {
                       const src = img.image_url || img.image || 'https://images.unsplash.com/photo-1523580494863-6f3031224c94?w=800&auto=format&fit=crop&q=60';
                       return (
                         <div key={img.id || idx} className="relative h-60 rounded-2xl overflow-hidden group shadow-sm border border-slate-200 flex flex-col justify-end bg-slate-900">
-                          <img src={src} alt={img.title || "Photo"} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition duration-500 opacity-90 group-hover:opacity-100" />
+                          <MediaImage src={src} alt={img.title || "Photo"} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition duration-500 opacity-90 group-hover:opacity-100" />
                           <div className="relative z-10 p-3 bg-gradient-to-t from-slate-950 via-slate-950/60 to-transparent flex items-end justify-between">
                             <div className="min-w-0 pr-2">
                               <span className="text-[10px] text-white/80 font-mono block">Photo #{idx + 1}</span>
@@ -1923,7 +2136,7 @@ const PresidentDashboard = () => {
                             >
                               {/* Folder Cover with Glassy Overlays */}
                               <div className="relative h-44 overflow-hidden bg-slate-900/40">
-                                <img
+                                <MediaImage
                                   src={cover}
                                   alt={folder.album_name}
                                   className="w-full h-full object-cover group-hover:scale-105 transition duration-500 opacity-90 group-hover:opacity-100"
@@ -2309,7 +2522,7 @@ const PresidentDashboard = () => {
                   >
                     <X size={24} />
                   </button>
-                  <img
+                  <MediaImage
                     src={activeShowcaseImage.src}
                     alt={activeShowcaseImage.title}
                     className="max-h-[80vh] w-auto rounded-2xl shadow-2xl object-contain border border-white/20"
@@ -2354,55 +2567,58 @@ const PresidentDashboard = () => {
 
       {/* 1. COMPLETE CLUB EDITING MODAL (WITH INTEGRATED CABINET ROSTER) */}
       {showClubEditModal && society && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-3xl w-full p-6 sm:p-8 shadow-2xl relative max-h-[92vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-3xl max-w-3xl w-full p-5 sm:p-8 shadow-2xl relative max-h-[92vh] flex flex-col overflow-hidden">
             <button
               onClick={() => setShowClubEditModal(false)}
-              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 cursor-pointer"
+              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 cursor-pointer z-10"
             >
               <X size={20} />
             </button>
 
-            <h3 className="text-xl font-black text-slate-900 flex items-center gap-2 mb-1">
-              <Settings className="text-indigo-600" /> Edit Complete Club Profile & Cabinet Roster
-            </h3>
-            <p className="text-xs text-slate-500 font-medium mb-5">
-              Customize {society.name}'s cover photo, logo, vision, contact info, and manage cabinet roles all in one place.
-            </p>
+            <div className="shrink-0 mb-3 pb-2 border-b border-slate-100">
+              <h3 className="text-lg sm:text-xl font-black text-slate-900 flex items-center gap-2 mb-1">
+                <Settings className="text-indigo-600" /> Edit Complete Club Profile & Cabinet Roster
+              </h3>
+              <p className="text-xs text-slate-500 font-medium mb-3">
+                Customize {society.name}'s cover photo, logo, vision, contact info, and manage cabinet roles all in one place.
+              </p>
 
-            {/* TAB SELECTOR */}
-            <div className="flex border-b border-slate-200 mb-6 gap-2">
-              <button
-                type="button"
-                onClick={() => setClubEditTab('branding')}
-                className={`pb-2.5 px-4 text-xs font-black transition cursor-pointer border-b-2 ${
-                  clubEditTab === 'branding' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                1. Branding, Logo & Vision
-              </button>
-              <button
-                type="button"
-                onClick={() => setClubEditTab('cabinet')}
-                className={`pb-2.5 px-4 text-xs font-black transition cursor-pointer border-b-2 ${
-                  clubEditTab === 'cabinet' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                2. Cabinet & Executive Roster ({cabinet.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setClubEditTab('banking')}
-                className={`pb-2.5 px-4 text-xs font-black transition cursor-pointer border-b-2 ${
-                  clubEditTab === 'banking' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                3. Banking & Fee Accounts
-              </button>
+              {/* TAB SELECTOR */}
+              <div className="flex border-b border-slate-200 gap-2 overflow-x-auto pb-1">
+                <button
+                  type="button"
+                  onClick={() => setClubEditTab('branding')}
+                  className={`pb-2 px-3 text-xs font-black transition cursor-pointer border-b-2 whitespace-nowrap ${
+                    clubEditTab === 'branding' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  1. Branding, Logo & Vision
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setClubEditTab('cabinet')}
+                  className={`pb-2 px-3 text-xs font-black transition cursor-pointer border-b-2 whitespace-nowrap ${
+                    clubEditTab === 'cabinet' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  2. Cabinet & Executive Roster ({activeCabinet.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setClubEditTab('banking')}
+                  className={`pb-2 px-3 text-xs font-black transition cursor-pointer border-b-2 whitespace-nowrap ${
+                    clubEditTab === 'banking' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  3. Banking & Fee Accounts
+                </button>
+              </div>
             </div>
 
-            {/* TAB 1: BRANDING & VISUALS */}
-            {clubEditTab === 'branding' && (
+            <div className="flex-1 overflow-y-auto pr-1 space-y-4">
+              {/* TAB 1: BRANDING & VISUALS */}
+              {clubEditTab === 'branding' && (
               <form onSubmit={handleUpdateClubProfile} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
@@ -2606,11 +2822,11 @@ const PresidentDashboard = () => {
                   </div>
                 </div>
 
-                <div className="pt-3 flex justify-end gap-3">
+                <div className="pt-3 border-t border-slate-100 flex justify-end gap-3 sticky bottom-0 bg-white py-2 z-10">
                   <button
                     type="button"
                     onClick={() => setShowClubEditModal(false)}
-                    className="px-4 py-2 text-slate-600 text-xs font-bold rounded-xl hover:bg-slate-100"
+                    className="px-4 py-2 text-slate-600 text-xs font-bold rounded-xl hover:bg-slate-100 cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -2804,14 +3020,18 @@ const PresidentDashboard = () => {
                                   type="text"
                                   autoFocus
                                   required
-                                  placeholder="e.g. Graphic Designer"
+                                  placeholder="e.g. Stage Decore Head or Graphic Designer"
                                   value={newCabinetForm.role_title}
-                                  onChange={e => setNewCabinetForm({ ...newCabinetForm, role_title: e.target.value })}
+                                  onChange={e => {
+                                    const customVal = e.target.value;
+                                    const autoRank = getDynamicRoleRank({ role_title: customVal });
+                                    setNewCabinetForm({ ...newCabinetForm, role_title: customVal, priority_rank: autoRank });
+                                  }}
                                   className="w-full px-3.5 py-2.5 bg-white border border-indigo-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none"
                                 />
                                 <button type="button" onClick={() => {
                                   setIsCustomCabinetRole(false);
-                                  setNewCabinetForm({ ...newCabinetForm, role_title: 'Vice President' });
+                                  setNewCabinetForm({ ...newCabinetForm, role_title: 'Vice President - Operations', priority_rank: 200 });
                                 }} className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl" title="Cancel Custom Role">
                                   <XCircle size={16} />
                                 </button>
@@ -2820,24 +3040,27 @@ const PresidentDashboard = () => {
                               <select
                                 value={newCabinetForm.role_title}
                                 onChange={e => {
-                                  if (e.target.value === 'CUSTOM_ROLE') {
+                                  const val = e.target.value;
+                                  if (val === 'CUSTOM_ROLE') {
                                     setIsCustomCabinetRole(true);
-                                    setNewCabinetForm({ ...newCabinetForm, role_title: '' });
+                                    setNewCabinetForm({ ...newCabinetForm, role_title: '', priority_rank: 900 });
                                   } else {
-                                    setNewCabinetForm({ ...newCabinetForm, role_title: e.target.value });
+                                    const calculatedRank = getDynamicRoleRank({ role_title: val });
+                                    setNewCabinetForm({ ...newCabinetForm, role_title: val, priority_rank: calculatedRank });
                                   }
                                 }}
                                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
                               >
-                                <option value="Vice President">Vice President</option>
-                                <option value="General Secretary">General Secretary</option>
-                                <option value="Treasurer & Finance Lead">Treasurer & Finance Lead</option>
-                                <option value="Technical & Cyber Head">Technical & Cyber Head</option>
-                                <option value="Media & Public Relations Lead">Media & Public Relations Lead</option>
-                                <option value="Event Director">Event Director</option>
-                                <option value="Logistics Manager">Logistics Manager</option>
-                                <option value="Executive Council Member">Executive Council Member</option>
-                                <option value="CUSTOM_ROLE" className="font-black text-indigo-600">+ Add Custom Role...</option>
+                                {ROLE_TIER_CATEGORIES.map(cat => (
+                                  <optgroup key={cat.category} label={cat.category}>
+                                    {cat.roles.map(r => (
+                                      <option key={r.title} value={r.title}>
+                                        {r.title}
+                                      </option>
+                                    ))}
+                                  </optgroup>
+                                ))}
+                                <option value="CUSTOM_ROLE" className="font-black text-indigo-600">+ Add Custom Designation (Manual)...</option>
                               </select>
                             )}
                           </div>
@@ -2857,12 +3080,36 @@ const PresidentDashboard = () => {
                           </div>
                         </div>
 
-                        <div className="pt-2 flex justify-end">
+                        {isCustomCabinetRole && (
+                          <div className="p-3 bg-indigo-50/60 rounded-xl border border-indigo-100">
+                            <label className="block text-[11px] font-bold uppercase text-indigo-900 mb-1">
+                              Hierarchy Priority Rank (100–900)
+                            </label>
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="number"
+                                min="1"
+                                max="1000"
+                                value={newCabinetForm.priority_rank}
+                                onChange={e => setNewCabinetForm({ ...newCabinetForm, priority_rank: parseInt(e.target.value) || 900 })}
+                                className="w-32 px-3 py-1.5 bg-white border border-indigo-300 rounded-lg text-xs font-bold text-slate-800"
+                              />
+                              <span className="text-[10px] text-slate-500">
+                                <strong>Hierarchy:</strong> 100=President, 200=VPs, 300=GS/Treasury, 400=Directors, 500=Heads, 600=Team Members, 900=General.
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <p className="text-[11px] text-slate-500 font-medium">
+                            Nominations require <strong>Faculty Advisor</strong> verification. Official digital cards are issued once approved.
+                          </p>
                           <button
                             type="submit"
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition shadow-md shadow-indigo-600/30 flex items-center gap-2 cursor-pointer"
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition shadow-md shadow-indigo-600/30 flex items-center gap-2 cursor-pointer shrink-0"
                           >
-                            <UserPlus size={15} /> Confirm & Induct {lookedUpStudent.full_name || lookedUpStudent.username} to Cabinet
+                            <UserPlus size={15} /> Nominate {lookedUpStudent.full_name || lookedUpStudent.username} to Cabinet
                           </button>
                         </div>
                       </form>
@@ -2871,60 +3118,192 @@ const PresidentDashboard = () => {
                 </div>
 
                 {/* Cabinet List */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-black uppercase text-slate-400 tracking-wider block">
-                      Active Executive Roster ({cabinet.length} Members)
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-bold">
-                      Click any member to inspect full details
-                    </span>
+                <div className="space-y-6">
+                  {/* 1. Verified Active Executive Roster */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-2">
+                        Official Executive Cabinet ({verifiedCabinet.length} Verified)
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-bold">
+                        Digital ID Cards Issued
+                      </span>
+                    </div>
+
+                    {verifiedCabinet.length === 0 ? (
+                      <p className="text-xs text-slate-400 font-medium p-4 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                        No verified executive cabinet members currently. Nominate candidates above.
+                      </p>
+                    ) : (
+                      verifiedCabinet.map(cab => (
+                        <div 
+                          key={cab.id} 
+                          onClick={() => setSelectedCabinetStudent(cab)}
+                          className="p-3 bg-white border border-slate-200 hover:border-indigo-400 hover:shadow-md transition rounded-2xl flex items-center justify-between cursor-pointer group"
+                          title="Click to view full student information"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center font-bold text-sm group-hover:scale-105 transition">
+                              {(cab.full_name || cab.username || 'M')[0].toUpperCase()}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-xs font-black text-slate-900 group-hover:text-indigo-600 transition">{cab.full_name || cab.username}</h4>
+                                <span className="text-[10px] text-slate-400 font-bold hidden sm:inline">({cab.roll_number || cab.username})</span>
+                              </div>
+                              <span className="text-[11px] font-bold text-violet-600 block">{cab.role_title} • {cab.term_year}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 group-hover:bg-indigo-600 group-hover:text-white px-2 py-0.5 rounded-lg border border-indigo-200 transition">
+                              View Info ↗
+                            </span>
+                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-200 flex items-center gap-1">
+                              ✓ Verified Official
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleCabinetActive(cab.id);
+                              }}
+                              className="px-2 py-1 text-[10px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg border border-amber-200 transition cursor-pointer"
+                              title="Deactivate member (preserves administrative history)"
+                            >
+                              Deactivate
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveCabinetMember(cab.id);
+                              }}
+                              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                              title="Permanently Delete Member Record"
+                            >
+                              <UserMinus size={15} />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
 
-                  {cabinet.length === 0 ? (
-                    <p className="text-xs text-slate-400 font-medium p-4 text-center">No cabinet members inducted yet.</p>
-                  ) : (
-                    cabinet.map(cab => (
-                      <div 
-                        key={cab.id} 
-                        onClick={() => setSelectedCabinetStudent(cab)}
-                        className="p-3 bg-white border border-slate-200 hover:border-indigo-400 hover:shadow-md transition rounded-2xl flex items-center justify-between cursor-pointer group"
-                        title="Click to view full student information"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center font-bold text-sm group-hover:scale-105 transition">
-                            {(cab.full_name || cab.username || 'M')[0].toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="text-xs font-black text-slate-900 group-hover:text-indigo-600 transition">{cab.full_name || cab.username}</h4>
-                              <span className="text-[10px] text-slate-400 font-bold hidden sm:inline">({cab.roll_number || cab.username})</span>
-                            </div>
-                            <span className="text-[11px] font-bold text-violet-600 block">{cab.role_title} • {cab.term_year}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 group-hover:bg-indigo-600 group-hover:text-white px-2 py-0.5 rounded-lg border border-indigo-200 transition">
-                            View Info ↗
-                          </span>
-                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
-                            {cab.is_verified ? 'Verified' : 'Active'}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRemoveCabinetMember(cab.id);
-                            }}
-                            className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                            title="Remove Member"
-                          >
-                            <UserMinus size={15} />
-                          </button>
-                        </div>
+                  {/* 2. Pending Faculty Advisor Nominations */}
+                  {pendingCabinetNominations.length > 0 && (
+                    <div className="space-y-2 pt-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black uppercase text-amber-600 tracking-wider flex items-center gap-1.5">
+                          ⏳ Awaiting Faculty Advisor Endorsement ({pendingCabinetNominations.length} Nominations)
+                        </span>
+                        <span className="text-[10px] text-amber-600/80 font-bold">
+                          Pending Verification
+                        </span>
                       </div>
-                    ))
+
+                      {pendingCabinetNominations.map(cab => (
+                        <div 
+                          key={cab.id} 
+                          onClick={() => setSelectedCabinetStudent(cab)}
+                          className="p-3 bg-amber-50/50 border border-amber-200 hover:border-amber-400 hover:shadow-md transition rounded-2xl flex items-center justify-between cursor-pointer group"
+                          title="Click to view full student information"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-sm">
+                              {(cab.full_name || cab.username || 'M')[0].toUpperCase()}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-xs font-black text-slate-900 group-hover:text-amber-700 transition">{cab.full_name || cab.username}</h4>
+                                <span className="text-[10px] text-slate-400 font-bold hidden sm:inline">({cab.roll_number || cab.username})</span>
+                              </div>
+                              <span className="text-[11px] font-bold text-amber-700 block">{cab.role_title} • Term {cab.term_year}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2.5 py-0.5 rounded-lg border border-amber-300">
+                              Awaiting Advisor Review
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveCabinetMember(cab.id);
+                              }}
+                              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                              title="Cancel Nomination"
+                            >
+                              <UserMinus size={15} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Administrative History: Inactive / Past Cabinet Members */}
+                  {inactiveCabinet.length > 0 && (
+                    <div className="pt-4 border-t border-slate-200 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black uppercase text-slate-400 tracking-wider block">
+                          Past / Inactive Cabinet History ({inactiveCabinet.length} Records)
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          Preserved in Administrative History
+                        </span>
+                      </div>
+
+                      {inactiveCabinet.map(cab => (
+                        <div 
+                          key={cab.id} 
+                          onClick={() => setSelectedCabinetStudent(cab)}
+                          className="p-3 bg-slate-50/80 border border-slate-200/80 opacity-75 hover:opacity-100 hover:border-slate-300 transition rounded-2xl flex items-center justify-between cursor-pointer group"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-slate-200 text-slate-600 flex items-center justify-center font-bold text-sm">
+                              {(cab.full_name || cab.username || 'M')[0].toUpperCase()}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-xs font-bold text-slate-700 line-through">{cab.full_name || cab.username}</h4>
+                                <span className="text-[10px] text-slate-400 font-bold hidden sm:inline">({cab.roll_number || cab.username})</span>
+                              </div>
+                              <span className="text-[11px] font-medium text-slate-500 block">{cab.role_title} • {cab.term_year}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-slate-500 bg-slate-200 px-2 py-0.5 rounded-lg">
+                              Inactive
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleCabinetActive(cab.id);
+                              }}
+                              className="px-2 py-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg border border-emerald-200 transition cursor-pointer"
+                              title="Reactivate assignment"
+                            >
+                              Reactivate
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveCabinetMember(cab.id);
+                              }}
+                              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                              title="Permanently remove"
+                            >
+                              <UserMinus size={15} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               </div>
@@ -3008,6 +3387,7 @@ const PresidentDashboard = () => {
               </div>
             )}
 
+            </div>
           </div>
         </div>
       )}
@@ -3483,7 +3863,7 @@ const PresidentDashboard = () => {
             </div>
 
             <div className="flex-1 bg-slate-950 rounded-2xl overflow-hidden min-h-[300px] flex items-center justify-center border border-slate-800">
-              <img
+              <MediaImage
                 src={inspectDocEvent.signed_proposal_doc}
                 alt="Signed Dossier Scan"
                 className="max-h-[60vh] w-auto object-contain"
@@ -3491,14 +3871,14 @@ const PresidentDashboard = () => {
             </div>
 
             <div className="mt-4 pt-3 border-t border-slate-200 flex justify-end gap-3">
-              <a
+              <MediaLink
                 href={inspectDocEvent.signed_proposal_doc}
                 target="_blank"
                 rel="noreferrer"
                 className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-1.5"
               >
                 <ExternalLink size={14} /> Open in New Tab
-              </a>
+              </MediaLink>
               <button
                 onClick={() => setInspectDocEvent(null)}
                 className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold"
@@ -4354,6 +4734,15 @@ const PresidentDashboard = () => {
         </div>
       )}
 
+      {/* PRESIDENT PROFILE EDIT MODAL */}
+      <ExecutiveProfileModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        onProfileUpdated={() => {
+          showToast("Presidential profile and photo updated successfully!");
+        }}
+      />
+
       {/* CREATE EVENT PROPOSAL MODAL */}
       {showCreateProposalModal && (
         <CreateProposalModal
@@ -4384,111 +4773,20 @@ const PresidentDashboard = () => {
         />
       )}
 
-      {/* ADVERTISE MARKETING MATERIALS MODAL */}
+      {/* EDIT & PUBLISH MARKETING MATERIALS MODAL */}
       {showAdvertiseModal && advertiseTargetEvent && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 font-sans">
-          <div className="bg-white rounded-3xl max-w-xl w-full p-6 sm:p-8 shadow-2xl relative max-h-[92vh] overflow-y-auto">
-            <button
-              type="button"
-              onClick={() => {
-                setShowAdvertiseModal(false);
-                setAdvertiseTargetEvent(null);
-                setAdvertiseCoverFile(null);
-                setAdvertiseCoverPreview('');
-                setAdvertiseGalleryFiles([]);
-                setAdvertiseGalleryPreviews([]);
-                setAdvertiseError(null);
-              }}
-              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 cursor-pointer p-1 rounded-lg hover:bg-slate-100 transition"
-            >
-              <X size={20} />
-            </button>
-
-            {advertiseError && (
-              <div className="mb-4 p-3.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-bold flex items-center gap-2">
-                <AlertCircle size={16} />
-                <span>{advertiseError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleAdvertiseSubmit} className="flex flex-col gap-4">
-              <h2 className="text-xl font-bold mb-4">Prepare Marketing Materials</h2>
-              
-              <div>
-                <label className="block text-sm font-bold mb-2">Main Cover Photo</label>
-                <input 
-                  type="file" 
-                  accept="image/*" 
-                  required={!advertiseCoverPreview}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      setAdvertiseCoverFile(file);
-                      const reader = new FileReader();
-                      reader.onload = () => setAdvertiseCoverPreview(reader.result);
-                      reader.readAsDataURL(file);
-                    }
-                  }}
-                  className="w-full border p-2 rounded" 
-                />
-                {advertiseCoverPreview && (
-                  <div className="mt-2 relative h-36 rounded-lg overflow-hidden border border-slate-200 bg-slate-900">
-                    <img src={advertiseCoverPreview} alt="Cover Preview" className="w-full h-full object-cover" />
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold mb-2">Additional Gallery Images (Optional)</label>
-                <input 
-                  type="file" 
-                  accept="image/*" 
-                  multiple 
-                  onChange={(e) => {
-                    const files = Array.from(e.target.files || []);
-                    setAdvertiseGalleryFiles(files);
-                    setAdvertiseGalleryPreviews([]);
-                    files.forEach(f => {
-                      const reader = new FileReader();
-                      reader.onload = () => setAdvertiseGalleryPreviews(prev => [...prev, reader.result]);
-                      reader.readAsDataURL(f);
-                    });
-                  }}
-                  className="w-full border p-2 rounded" 
-                />
-                {advertiseGalleryPreviews.length > 0 && (
-                  <div className="mt-2 grid grid-cols-4 gap-2">
-                    {advertiseGalleryPreviews.map((src, i) => (
-                      <div key={i} className="h-16 rounded border overflow-hidden">
-                        <img src={src} alt={`Gallery preview ${i+1}`} className="w-full h-full object-cover" />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold mb-2">Detailed Student-Facing Description</label>
-                <textarea 
-                  rows="5" 
-                  required 
-                  value={advertiseDescription}
-                  onChange={(e) => setAdvertiseDescription(e.target.value)}
-                  className="w-full border p-2 rounded" 
-                  placeholder="Write a compelling description for the students..."
-                ></textarea>
-              </div>
-
-              <button 
-                type="submit" 
-                disabled={isSubmittingAdvertise}
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-3 rounded-lg mt-4 cursor-pointer shadow-lg transition"
-              >
-                {isSubmittingAdvertise ? "Publishing to Student Portal..." : "Publish to Student Portal"}
-              </button>
-            </form>
-          </div>
-        </div>
+        <EditAdvertisementModal
+          event={advertiseTargetEvent}
+          onClose={() => {
+            setShowAdvertiseModal(false);
+            setAdvertiseTargetEvent(null);
+          }}
+          onSaved={(updatedEvent) => {
+            setEvents(prev => prev.map(ev => ev.id === updatedEvent.id ? { ...ev, ...updatedEvent } : ev));
+            fetchPresidentData();
+            showToast(`Advertisement updated for "${updatedEvent.title}"!`);
+          }}
+        />
       )}
 
       {/* CERTIFICATE TEMPLATE DESIGN STUDIO MODAL */}
@@ -4714,64 +5012,253 @@ const PresidentDashboard = () => {
       )}
 
       {/* CERTIFICATE TEMPLATE PREVIEW MODAL */}
-      {previewTemplate && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl relative">
-            <button
-              type="button"
-              onClick={() => setPreviewTemplate(null)}
-              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 cursor-pointer"
-            >
-              <X size={20} />
-            </button>
-
-            <div className="flex items-center gap-2 mb-4">
-              <Award className="text-amber-500" size={20} />
-              <div>
-                <h3 className="text-base font-black text-slate-900">{previewTemplate.title}</h3>
-                <span className="text-xs text-slate-500 font-medium">Status: {previewTemplate.status} • {previewTemplate.event_title || 'Society Default'}</span>
-              </div>
-            </div>
-
-            <div 
-              className="rounded-2xl p-6 bg-white shadow border-4 relative text-center min-h-[300px] flex flex-col justify-between"
-              style={{
-                borderColor: previewTemplate.layout_json?.theme_color || '#1e1b4b',
-                backgroundImage: 'radial-gradient(#e0e7ff 0.75px, transparent 0.75px), radial-gradient(#e0e7ff 0.75px, #ffffff 0.75px)',
-                backgroundSize: '24px 24px'
-              }}
-            >
-              <div>
-                <h4 className="text-xs uppercase tracking-widest text-slate-500 font-bold">{previewTemplate.layout_json?.subtitle || 'DSMS Campus Network'}</h4>
-                <h2 className="text-xl font-black uppercase text-slate-900 font-serif mt-1">{previewTemplate.layout_json?.title || previewTemplate.title}</h2>
-              </div>
-              <div className="py-4 space-y-1">
-                <span className="text-[11px] uppercase text-slate-400 font-bold">Awarded to</span>
-                <h3 className="text-xl font-black text-slate-900 font-serif underline decoration-amber-500 decoration-1 underline-offset-4">[ Student Name ]</h3>
-                <p className="text-xs text-slate-600 max-w-sm mx-auto pt-2">{previewTemplate.layout_json?.body_text}</p>
-                <h4 className="text-sm font-black pt-1" style={{ color: previewTemplate.layout_json?.theme_color || '#1e1b4b' }}>
-                  {previewTemplate.event_title || '[ Event Title ]'}
-                </h4>
-              </div>
-              <div className="pt-3 border-t border-slate-200 grid grid-cols-2 text-left text-xs font-bold text-slate-500">
-                <div>
-                  <div className="w-24 h-0.5 bg-slate-300 mb-1"></div>
-                  {previewTemplate.layout_json?.signatory_title_left || 'Faculty Advisor'}
-                </div>
-                <div className="text-right">
-                  <div className="w-24 h-0.5 bg-slate-300 ml-auto mb-1"></div>
-                  {previewTemplate.layout_json?.signatory_title_right || 'Society President'}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-slate-100 flex justify-end">
+      {previewTemplate && (() => {
+        const previewTheme = getSocietyCertificateTheme(society?.id, society?.name);
+        const primaryColor = previewTemplate.layout_json?.theme_color || previewTheme.primaryColor;
+        return (
+          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-3xl w-full p-6 sm:p-8 shadow-2xl relative">
               <button
                 type="button"
                 onClick={() => setPreviewTemplate(null)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition cursor-pointer"
+                className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 cursor-pointer"
               >
-                Close Preview
+                <X size={20} />
+              </button>
+
+              <div className="flex items-center justify-between mb-4 pr-8">
+                <div className="flex items-center gap-2">
+                  <Award className="text-amber-500" size={22} />
+                  <div>
+                    <h3 className="text-base font-black text-slate-900">{previewTemplate.title}</h3>
+                    <span className="text-xs text-slate-500 font-medium">Status: {previewTemplate.status} • {previewTemplate.event_title || 'Society Default'}</span>
+                  </div>
+                </div>
+                <span className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1 rounded-full flex items-center gap-1.5 border border-slate-200">
+                  <Sparkles size={13} className="text-amber-500" /> {previewTheme.name}
+                </span>
+              </div>
+
+              <div 
+                className="rounded-2xl p-6 bg-white shadow-sm relative text-center min-h-[340px] flex flex-col justify-between"
+                style={{
+                  border: previewTheme.outerBorder,
+                  backgroundImage: previewTheme.bgPattern,
+                  backgroundSize: previewTheme.bgPatternSize,
+                  backgroundPosition: '0 0, 12px 12px'
+                }}
+              >
+                {/* Theme Inner Border */}
+                <div className="absolute inset-1.5 pointer-events-none" style={{ border: previewTheme.innerBorder }} />
+
+                {/* Theme Corners */}
+                {previewTheme.cornerRenderer && previewTheme.cornerRenderer()}
+
+                {/* TWIN LOGO HEADER: IUB (LEFT) & SOCIETY LOGO (RIGHT) */}
+                <div className="relative z-10 flex items-center justify-between px-2 pt-1">
+                  {/* IUB Logo */}
+                  <div className="flex items-center gap-2 text-left w-48 shrink-0">
+                    <IUBLogoEmblem size={44} />
+                    <div className="flex flex-col">
+                      <span className="text-[9px] font-black uppercase tracking-wider text-emerald-950 leading-tight">
+                        The Islamia University
+                      </span>
+                      <span className="text-[8px] font-bold text-amber-700">
+                        of Bahawalpur
+                      </span>
+                      <span className="text-[7.5px] font-medium text-slate-400">
+                        Estd. 1925 • Main Campus
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Center Title */}
+                  <div className="flex-1 px-2 text-center">
+                    <span 
+                      className="inline-block text-[8px] font-black uppercase tracking-[0.2em] px-2.5 py-0.5 rounded-full border mb-0.5 shadow-xs"
+                      style={{ 
+                        backgroundColor: `${primaryColor}12`, 
+                        borderColor: `${previewTheme.accentColor}40`,
+                        color: primaryColor 
+                      }}
+                    >
+                      {society?.name || 'Departmental Society'}
+                    </span>
+                    <h4 className="text-[9px] uppercase tracking-widest text-slate-500 font-bold">
+                      {previewTemplate.layout_json?.subtitle || 'DSMS Campus Network'}
+                    </h4>
+                    <h2 
+                      className="text-lg font-black uppercase font-serif leading-tight"
+                      style={{ color: primaryColor }}
+                    >
+                      {previewTemplate.layout_json?.title || previewTemplate.title}
+                    </h2>
+                  </div>
+
+                  {/* Society Logo */}
+                  <div className="flex items-center justify-end gap-2 text-right w-48 shrink-0">
+                    <div className="flex flex-col items-end">
+                      <span className="text-[9px] font-black uppercase text-slate-800 line-clamp-1 max-w-[110px]">
+                        {society?.name || 'Society'}
+                      </span>
+                      <span className="text-[7.5px] font-bold uppercase tracking-wider" style={{ color: previewTheme.accentColor }}>
+                        Official Seal
+                      </span>
+                      <span className="text-[7.5px] font-mono text-slate-400">
+                        DSMS Verified
+                      </span>
+                    </div>
+                    {society?.logo ? (
+                      <div className="w-11 h-11 rounded-lg border border-slate-200 bg-white p-0.5 flex items-center justify-center shrink-0 shadow-xs">
+                        <MediaImage src={society.logo} alt={society.name} className="w-full h-full object-contain rounded" />
+                      </div>
+                    ) : (
+                      <div className="w-11 h-11 rounded-lg border flex flex-col items-center justify-center shrink-0 text-white font-bold text-[8px]" style={{ backgroundColor: primaryColor, borderColor: previewTheme.accentColor }}>
+                        <Award size={16} className="text-amber-300" />
+                        <span className="text-[7px]">SOC</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="relative z-10 py-3 space-y-1">
+                  <span className="text-[10px] uppercase text-slate-400 font-bold tracking-widest">Awarded to</span>
+                  <h3 
+                    className="text-2xl font-black font-serif underline decoration-2 underline-offset-4"
+                    style={{ 
+                      color: '#0f172a',
+                      textDecorationColor: previewTheme.secondaryColor || '#d97706' 
+                    }}
+                  >
+                    [ Student Full Name ]
+                  </h3>
+                  <p className="text-xs text-slate-600 max-w-sm mx-auto pt-1 font-medium leading-relaxed">
+                    {previewTemplate.layout_json?.body_text || 'has actively participated in, completed all practical evaluation requirements, and demonstrated distinction in'}
+                  </p>
+                  <h4 className="text-sm font-black pt-1" style={{ color: primaryColor }}>
+                    {previewTemplate.event_title || '[ Event Title ]'}
+                  </h4>
+                </div>
+
+                {/* Signatories: Strictly Advisor and President (No DSA) */}
+                <div className="relative z-10 pt-2 border-t border-slate-200/80 grid grid-cols-2 text-left text-xs font-bold text-slate-600 px-2">
+                  <div>
+                    <div className="w-28 h-0.5 bg-slate-300 mb-1"></div>
+                    <span className="text-[10px] uppercase tracking-wider">{previewTemplate.layout_json?.signatory_title_left || 'Faculty Advisor'}</span>
+                  </div>
+                  <div className="text-right">
+                    <div className="w-28 h-0.5 bg-slate-300 ml-auto mb-1"></div>
+                    <span className="text-[10px] uppercase tracking-wider">{previewTemplate.layout_json?.signatory_title_right || 'Society President'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setPreviewTemplate(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Close Preview
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Delete Event Confirmation Modal */}
+      {deleteEventTarget && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-600">
+                <Trash2 size={24} />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900">Delete Event</h3>
+                <p className="text-xs text-slate-500">Permanent removal of event</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-600 mb-6">
+              Are you sure you want to permanently delete <strong className="text-slate-900 font-bold">"{deleteEventTarget.title}"</strong>? 
+              This will release university date locks and remove all associated attendee passes. This action cannot be undone.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingEvent}
+                onClick={() => setDeleteEventTarget(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingEvent}
+                onClick={handleDeleteEvent}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingEvent ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={14} />
+                    Yes, Delete Event
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Proposal Confirmation Modal */}
+      {deleteProposalTarget && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-600">
+                <Trash2 size={24} />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900">Delete Event Proposal</h3>
+                <p className="text-xs text-slate-500">{deleteProposalTarget.proposal_no}</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-600 mb-6">
+              Are you sure you want to delete proposal <strong className="text-slate-900 font-bold">"{deleteProposalTarget.event_title || deleteProposalTarget.title}"</strong>? 
+              This will release any provisional date reservations on the campus calendar.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingProposal}
+                onClick={() => setDeleteProposalTarget(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingProposal}
+                onClick={handleDeleteProposal}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingProposal ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={14} />
+                    Yes, Delete Proposal
+                  </>
+                )}
               </button>
             </div>
           </div>

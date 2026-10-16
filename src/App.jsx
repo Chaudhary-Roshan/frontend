@@ -1,78 +1,84 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
-import Navbar from './components/layout/Navbar';
+import { PWAProvider } from './context/PWAContext';
+import AppShell from './components/layout/AppShell';
+import { PageSkeleton, DashboardSkeleton } from './components/layout/AppShellSkeleton';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import StudentOnlyRoute from './components/auth/StudentOnlyRoute';
 
+// ----------------------------------------------------------------------
+// Code-Split Dynamic Route Modules (App Shell Architecture)
+// ----------------------------------------------------------------------
 // Public & Campus Discovery Pages
-import Home from './pages/Home';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import Societies from './pages/Societies';
-import SocietyDetail from './pages/SocietyDetail';
-import Events from './pages/Events';
-import EventDetail from './pages/EventDetail';
-import EventCalendar from './pages/EventCalendar';
-import Showcases from './pages/Showcases';
-import Galleries from './pages/Galleries';
-import Leaderboards from './pages/Leaderboards';
-import News from './pages/News';
-import CertificateVerify from './pages/CertificateVerify';
-import { VerifyMemberPage, VerifyTicketPage } from './pages/VerifyCredential';
-import Help from './pages/Help';
+const Home = lazy(() => import('./pages/Home'));
+const Login = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
+const Societies = lazy(() => import('./pages/Societies'));
+const SocietyDetail = lazy(() => import('./pages/SocietyDetail'));
+const Events = lazy(() => import('./pages/Events'));
+const EventDetail = lazy(() => import('./pages/EventDetail'));
+const EventCalendar = lazy(() => import('./pages/EventCalendar'));
+const Showcases = lazy(() => import('./pages/Showcases'));
+const Galleries = lazy(() => import('./pages/Galleries'));
+const Leaderboards = lazy(() => import('./pages/Leaderboards'));
+const News = lazy(() => import('./pages/News'));
+const CertificateVerify = lazy(() => import('./pages/CertificateVerify'));
+const VerifyMemberPage = lazy(() => import('./pages/VerifyCredential').then(m => ({ default: m.VerifyMemberPage })));
+const VerifyTicketPage = lazy(() => import('./pages/VerifyCredential').then(m => ({ default: m.VerifyTicketPage })));
+const Help = lazy(() => import('./pages/Help'));
 
 // Role-Specific Portals
-import AdminDashboard from './pages/dashboards/AdminDashboard';
-import AdvisorDashboard from './pages/dashboards/AdvisorDashboard';
-import PresidentDashboard from './pages/dashboards/PresidentDashboard';
-import StudentDashboard from './pages/dashboards/StudentDashboard';
-import CoCurricularTranscript from './pages/dashboards/CoCurricularTranscript';
+const AdminDashboard = lazy(() => import('./pages/dashboards/AdminDashboard'));
+const AdvisorDashboard = lazy(() => import('./pages/dashboards/AdvisorDashboard'));
+const PresidentDashboard = lazy(() => import('./pages/dashboards/PresidentDashboard'));
+const StudentDashboard = lazy(() => import('./pages/dashboards/StudentDashboard'));
+const CoCurricularTranscript = lazy(() => import('./pages/dashboards/CoCurricularTranscript'));
 
 // President Sub-Pages
-import CabinetManagement from './pages/dashboards/CabinetManagement';
-import RecruitmentManagement from './pages/dashboards/RecruitmentManagement';
-import CommunicationTrail from './pages/dashboards/CommunicationTrail';
-import BudgetManagement from './pages/dashboards/BudgetManagement';
-import AttendanceManagement from './pages/dashboards/AttendanceManagement';
-import MembershipRoster from './pages/dashboards/MembershipRoster';
-
-import Footer from './components/layout/Footer';
+const CabinetManagement = lazy(() => import('./pages/dashboards/CabinetManagement'));
+const RecruitmentManagement = lazy(() => import('./pages/dashboards/RecruitmentManagement'));
+const CommunicationTrail = lazy(() => import('./pages/dashboards/CommunicationTrail'));
+const BudgetManagement = lazy(() => import('./pages/dashboards/BudgetManagement'));
+const AttendanceManagement = lazy(() => import('./pages/dashboards/AttendanceManagement'));
+const MembershipRoster = lazy(() => import('./pages/dashboards/MembershipRoster'));
 
 function App() {
   return (
-    <AuthProvider>
-      <Router>
-        <div className="flex flex-col min-h-screen bg-slate-50">
-          <Navbar />
-          <div className="flex-1">
-            <Routes>
+    <PWAProvider>
+      <AuthProvider>
+        <Router>
+          <Routes>
+            {/* The Persistent App Shell Frame */}
+            <Route element={<AppShell />}>
               {/* Unauthenticated Gateway */}
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
 
-              {/* Private Campus Discovery Routes (Protected - Authenticated Only) */}
-              <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
-              <Route path="/societies" element={<ProtectedRoute><Societies /></ProtectedRoute>} />
-              <Route path="/societies/:id" element={<ProtectedRoute><SocietyDetail /></ProtectedRoute>} />
-              <Route path="/events" element={<ProtectedRoute><Events /></ProtectedRoute>} />
-              <Route path="/events/:id" element={<ProtectedRoute><EventDetail /></ProtectedRoute>} />
-              <Route path="/calendar" element={<ProtectedRoute><EventCalendar /></ProtectedRoute>} />
-              <Route path="/showcases" element={<ProtectedRoute><Showcases /></ProtectedRoute>} />
-              <Route path="/gallery" element={<ProtectedRoute><Galleries /></ProtectedRoute>} />
-              <Route path="/leaderboards" element={<ProtectedRoute><Leaderboards /></ProtectedRoute>} />
-              <Route path="/news" element={<ProtectedRoute><News /></ProtectedRoute>} />
+              {/* Public Campus Discovery Routes */}
+              <Route path="/" element={<Home />} />
+              <Route path="/societies" element={<Societies />} />
+              <Route path="/societies/:id" element={<SocietyDetail />} />
+              <Route path="/events" element={<Events />} />
+              <Route path="/events/:id" element={<EventDetail />} />
+              <Route path="/calendar" element={<EventCalendar />} />
+              <Route path="/showcases" element={<Showcases />} />
+              <Route path="/gallery" element={<Galleries />} />
+              <Route path="/leaderboards" element={<Leaderboards />} />
+              <Route path="/news" element={<News />} />
               <Route path="/verify" element={<CertificateVerify />} />
               <Route path="/verify/member/:code" element={<VerifyMemberPage />} />
               <Route path="/verify/ticket/:code" element={<VerifyTicketPage />} />
-              <Route path="/help" element={<ProtectedRoute><Help /></ProtectedRoute>} />
+              <Route path="/help" element={<Help />} />
 
-              {/* Role-Specific Protected Portals */}
+              {/* Role-Specific Protected Portals with Dedicated Dashboard Skeleton */}
               <Route 
                 path="/student-dashboard" 
                 element={
                   <StudentOnlyRoute>
-                    <StudentDashboard />
+                    <Suspense fallback={<DashboardSkeleton />}>
+                      <StudentDashboard />
+                    </Suspense>
                   </StudentOnlyRoute>
                 } 
               />
@@ -87,14 +93,18 @@ function App() {
               />
 
               <Route path="/president-dashboard" element={
-                <ProtectedRoute allowedRoles={['president', 'faculty', 'admin']}>
-                  <PresidentDashboard />
+                <ProtectedRoute allowedRoles={['president', 'admin']}>
+                  <Suspense fallback={<DashboardSkeleton />}>
+                    <PresidentDashboard />
+                  </Suspense>
                 </ProtectedRoute>
               } />
 
               <Route path="/advisor-dashboard" element={
-                <ProtectedRoute allowedRoles={['faculty', 'president', 'admin']}>
-                  <AdvisorDashboard />
+                <ProtectedRoute allowedRoles={['faculty', 'admin']}>
+                  <Suspense fallback={<DashboardSkeleton />}>
+                    <AdvisorDashboard />
+                  </Suspense>
                 </ProtectedRoute>
               } />
 
@@ -102,11 +112,13 @@ function App() {
 
               <Route path="/admin-dashboard" element={
                 <ProtectedRoute allowedRoles={['admin']}>
-                  <AdminDashboard />
+                  <Suspense fallback={<DashboardSkeleton />}>
+                    <AdminDashboard />
+                  </Suspense>
                 </ProtectedRoute>
               } />
 
-              {/* Attendance Desk for President, Faculty, Admin, and Assigned Student Volunteers */}
+              {/* Operations & Attendance Management */}
               <Route path="/attendance" element={
                 <ProtectedRoute allowedRoles={['president', 'faculty', 'admin', 'student']}>
                   <AttendanceManagement />
@@ -123,12 +135,12 @@ function App() {
                 </ProtectedRoute>
               } />
               <Route path="/president/cabinet" element={
-                <ProtectedRoute allowedRoles={['president', 'admin']}>
+                <ProtectedRoute allowedRoles={['president', 'faculty', 'admin']}>
                   <CabinetManagement />
                 </ProtectedRoute>
               } />
               <Route path="/president/recruitments" element={
-                <ProtectedRoute allowedRoles={['president', 'admin']}>
+                <ProtectedRoute allowedRoles={['president', 'faculty', 'admin']}>
                   <RecruitmentManagement />
                 </ProtectedRoute>
               } />
@@ -143,14 +155,13 @@ function App() {
                 </ProtectedRoute>
               } />
 
-              {/* Fallback to Home / Protected Route */}
+              {/* Fallback to Home */}
               <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </div>
-          <Footer />
-        </div>
-      </Router>
-    </AuthProvider>
+            </Route>
+          </Routes>
+        </Router>
+      </AuthProvider>
+    </PWAProvider>
   );
 }
 

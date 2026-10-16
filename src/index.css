@@ -46,51 +46,147 @@
   }
 }
 
+/* Print Media Styles */
 .ticket-print-container {
   display: none;
 }
 
 @media print {
+  /* Set exact color rendering and clean page margins */
   @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+
+  body, html {
+    background: #ffffff !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Universal print hidden elements */
+  nav,
+  header,
+  footer,
+  aside,
+  .hide-on-print,
+  .print\:hidden,
+  .no-print,
+  [role="alert"],
+  .pwa-banner,
+  .mobile-bottom-nav,
+  #network-status-banner,
+  .route-progress-bar {
+    display: none !important;
+  }
+
+  /* Reset outer application shell containers so they don't force page overflows */
+  .min-h-screen,
+  body > div,
+  main {
+    min-height: 0 !important;
+    height: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
+    overflow: visible !important;
+  }
+
+  /* Avoid awkward page breaks inside cards, tables, signature blocks */
+  .print-avoid-break,
+  table,
+  tr,
+  figure,
+  .signature-block,
+  .ticket-container {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* ----------------------------------------------------
+     1. Ticket Print: A4 Landscape
+     ---------------------------------------------------- */
+  @page ticketLandscape {
     size: A4 landscape;
-    margin: 0;
-  }
-
-  body {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-
-  body * {
-    visibility: hidden;
-  }
-
-  .ticket-container, .ticket-print-container {
-    page-break-inside: avoid;
-    break-inside: avoid;
-  }
-
-  .ticket-print-container, .ticket-print-container * {
-    visibility: visible;
+    margin: 6mm;
   }
 
   .ticket-print-container {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    gap: 16px;
-    background: white;
-    padding: 16px;
+    page: ticketLandscape;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    gap: 8px !important;
+    background: white !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
-  
-  .hide-on-print {
-    display: none !important;
+
+  .ticket-print-container .ticket-card-printable {
+    transform: scale(0.92);
+    transform-origin: center center;
+    margin-bottom: 6px;
+  }
+
+  /* ----------------------------------------------------
+     2. Co-Curricular Transcript: A4 Portrait
+     ---------------------------------------------------- */
+  .transcript-print-document {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: white !important;
+  }
+
+  /* ----------------------------------------------------
+     3. Event Proposal Document: A4 Portrait
+     ---------------------------------------------------- */
+  .proposal-print-document {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: white !important;
+  }
+
+  /* Lift modal out of fixed dark overlay for clean multi-page document printing */
+  .modal-print-wrapper {
+    position: static !important;
+    background: white !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    display: block !important;
+    inset: auto !important;
+    z-index: auto !important;
+  }
+
+  .modal-print-container {
+    max-height: none !important;
+    max-width: 100% !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* ----------------------------------------------------
+     4. Certificate Print: A4 Landscape
+     ---------------------------------------------------- */
+  .certificate-print-document {
+    margin: 0 auto !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 }
 

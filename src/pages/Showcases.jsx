@@ -1,3 +1,4 @@
+import { MediaImage } from '../components/common/AuthenticatedMedia';
 import React, { useState, useEffect } from 'react';
 import { Award, Trophy, Sparkles, Filter, Users } from 'lucide-react';
 import api from '../utils/api';
@@ -122,7 +123,7 @@ const Showcases = () => {
             <div key={item.id} className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col justify-between group">
               <div>
                 <div className="h-56 relative overflow-hidden bg-slate-900">
-                  <img
+                  <MediaImage
                     src={item.image}
                     alt={item.title}
                     className="w-full h-full object-cover group-hover:scale-105 transition duration-500 opacity-90 group-hover:opacity-100"

@@ -1,3 +1,4 @@
+import { MediaImage } from '../common/AuthenticatedMedia';
 import React, { useState } from 'react';
 import {
   User, Mail, Phone, GraduationCap, Building2, IdCard,
@@ -6,6 +7,7 @@ import {
 } from 'lucide-react';
 import api from '../../utils/api';
 import { uploadFileToServer } from '../../utils/fileUpload';
+import AcademicCombobox from '../common/AcademicCombobox';
 
 const STEPS = [
   { id: 1, label: 'Personal', icon: User },
@@ -139,6 +141,7 @@ const CompleteProfileModal = ({ profile, onClose, onProfileUpdated }) => {
         gender: form.gender,
         cnic: form.cnic,
         avatar_url: form.avatar_url,
+        profile_photo_url: form.avatar_url,
         department: form.department,
         program: form.program,
         batch: form.batch,
@@ -298,7 +301,7 @@ const CompleteProfileModal = ({ profile, onClose, onProfileUpdated }) => {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px', background: 'rgba(99,102,241,0.08)', borderRadius: '14px', border: '1px solid rgba(99,102,241,0.15)' }}>
                     <div style={{ width: '70px', height: '70px', borderRadius: '16px', flexShrink: 0, overflow: 'hidden', background: 'rgba(51,65,85,0.8)', border: '2px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {form.avatar_url
-                        ? <img src={form.avatar_url} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ? <MediaImage src={form.avatar_url} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         : <User size={28} color="#475569" />}
                     </div>
                     <div>
@@ -360,18 +363,12 @@ const CompleteProfileModal = ({ profile, onClose, onProfileUpdated }) => {
 
               {step === 2 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                  <div>
-                    <label style={labelStyle}>Department <span style={{ color: '#f87171' }}>*</span></label>
-                    <input name="department" value={form.department} onChange={handleChange}
-                      placeholder="e.g. Department of Information and Communication Engineering"
-                      style={fieldStyle} onFocus={e => e.target.style.borderColor = '#6366f1'} onBlur={e => e.target.style.borderColor = 'rgba(51,65,85,0.8)'} />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Degree Program <span style={{ color: '#f87171' }}>*</span></label>
-                    <input name="program" value={form.program} onChange={handleChange}
-                      placeholder="e.g. BS Cyber Security and Digital Forensics"
-                      style={fieldStyle} onFocus={e => e.target.style.borderColor = '#6366f1'} onBlur={e => e.target.style.borderColor = 'rgba(51,65,85,0.8)'} />
-                  </div>
+                  <AcademicCombobox
+                    selectedDepartment={form.department}
+                    onDepartmentChange={(dept) => setForm(prev => ({ ...prev, department: dept }))}
+                    selectedProgram={form.program}
+                    onProgramChange={(prog) => setForm(prev => ({ ...prev, program: prog }))}
+                  />
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                     <div>
                       <label style={labelStyle}>Academic Batch</label>
@@ -396,7 +393,7 @@ const CompleteProfileModal = ({ profile, onClose, onProfileUpdated }) => {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <div style={{ width: '44px', height: '44px', borderRadius: '10px', flexShrink: 0, overflow: 'hidden', background: 'rgba(51,65,85,0.8)', border: '2px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         {form.avatar_url
-                          ? <img src={form.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ? <MediaImage src={form.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           : <User size={22} color="#475569" style={{ margin: '11px' }} />}
                       </div>
                       <div>

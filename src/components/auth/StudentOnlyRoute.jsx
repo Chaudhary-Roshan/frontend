@@ -3,10 +3,10 @@ import { Navigate } from 'react-router-dom';
 import { AuthContext } from '../../context/AuthContext';
 
 const StudentOnlyRoute = ({ children, currentUser }) => {
-  const { user: authUser, loading } = useContext(AuthContext);
+  const { user: authUser, loading, isAuthLoading } = useContext(AuthContext);
   const user = currentUser || authUser;
 
-  if (loading) {
+  if (loading || isAuthLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>

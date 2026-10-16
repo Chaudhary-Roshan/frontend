@@ -8,6 +8,7 @@ import {
 import api from '../utils/api';
 
 const Login = () => {
+  const [loginPortal, setLoginPortal] = useState('student'); // 'student' | 'executive'
   const [identity, setIdentity] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -41,7 +42,9 @@ const Login = () => {
     const input = identity.trim();
 
     if (!input) {
-      setError('Please enter your University Email or Student Roll Number.');
+      setError(loginPortal === 'student' 
+        ? 'Please enter your registered University Email address.' 
+        : 'Please enter your issued Username.');
       return;
     }
     if (!password) {
@@ -49,27 +52,41 @@ const Login = () => {
       return;
     }
 
-    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input);
-    const isRollNumber = /^[A-Za-z0-9-]{3,30}$/.test(input);
-
-    if (!isEmail && !isRollNumber) {
-      setError('Please enter a valid University Email or Student Roll Number.');
-      return;
+    if (loginPortal === 'student') {
+      const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input);
+      if (!isEmail) {
+        setError('Students must log in using their registered Email address.');
+        return;
+      }
+    } else {
+      if (input.includes('@')) {
+        setError('Presidents, Faculty Advisors, and Super Admins must sign in with their assigned Username (e.g. president_cssc), not an email address.');
+        return;
+      }
     }
 
     setIsSubmitting(true);
     try {
       const userData = await login(input, password);
 
-      if (from && from !== '/login') {
-        navigate(from, { replace: true });
-        return;
-      }
+      const getRoleDashboard = (role) => {
+        if (role === 'admin') return '/admin-dashboard';
+        if (role === 'faculty') return '/advisor-dashboard';
+        if (role === 'president') return '/president-dashboard';
+        return '/student-dashboard';
+      };
 
-      if (userData.role === 'admin') navigate('/admin-dashboard');
-      else if (userData.role === 'faculty') navigate('/advisor-dashboard');
-      else if (userData.role === 'president') navigate('/president-dashboard');
-      else navigate('/student-dashboard');
+      const targetDashboard = getRoleDashboard(userData.role);
+      const isDashboardRoute = from && (
+        from.includes('dashboard') ||
+        ['/admin-dashboard', '/advisor-dashboard', '/president-dashboard', '/student-dashboard'].includes(from)
+      );
+
+      if (from && from !== '/login' && !isDashboardRoute) {
+        navigate(from, { replace: true });
+      } else {
+        navigate(targetDashboard, { replace: true });
+      }
     } catch (err) {
       if (err.response?.data?.requires_otp) {
         setUnverifiedUser({
@@ -84,6 +101,10 @@ const Login = () => {
           err.response.data.detail ||
           'This university account has been deactivated or suspended. Please contact campus administration.'
         );
+      } else if (!err.response) {
+        setError('Network error. Unable to connect to university server. Please check your internet connection.');
+      } else if (err.response.status >= 500) {
+        setError('Server error. The portal backend is currently restarting or experiencing an issue. Please try again in a moment.');
       } else {
         setError(
           err.response?.data?.detail ||
@@ -255,6 +276,42 @@ const Login = () => {
             </div>
           )}
 
+          {/* PORTAL SELECTOR TABS */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px',
+            background: 'rgba(30,41,59,0.7)', padding: '5px', borderRadius: '16px',
+            marginBottom: '20px', border: '1px solid rgba(51,65,85,0.7)'
+          }}>
+            <button
+              type="button"
+              onClick={() => { setLoginPortal('student'); setError(null); }}
+              style={{
+                padding: '9px 12px', borderRadius: '12px', border: 'none',
+                background: loginPortal === 'student' ? '#6366f1' : 'transparent',
+                color: loginPortal === 'student' ? '#fff' : '#94a3b8',
+                fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                transition: 'all 0.2s', boxShadow: loginPortal === 'student' ? '0 4px 12px rgba(99,102,241,0.35)' : 'none'
+              }}
+            >
+              🎓 Student Portal
+            </button>
+            <button
+              type="button"
+              onClick={() => { setLoginPortal('executive'); setError(null); }}
+              style={{
+                padding: '9px 12px', borderRadius: '12px', border: 'none',
+                background: loginPortal === 'executive' ? '#8b5cf6' : 'transparent',
+                color: loginPortal === 'executive' ? '#fff' : '#94a3b8',
+                fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                transition: 'all 0.2s', boxShadow: loginPortal === 'executive' ? '0 4px 12px rgba(139,92,246,0.35)' : 'none'
+              }}
+            >
+              👑 Executive / Staff
+            </button>
+          </div>
+
           <form onSubmit={handleLogin} noValidate autoComplete="on">
             {/* Identity Field */}
             <div style={{ marginBottom: '18px' }}>
@@ -262,15 +319,15 @@ const Login = () => {
                 display: 'block', fontSize: '11px', fontWeight: 700,
                 color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px'
               }}>
-                University Email or Roll Number
+                {loginPortal === 'student' ? 'Registered Email *' : 'Official Username *'}
               </label>
               <input
-                type="text"
+                type={loginPortal === 'student' ? 'email' : 'text'}
                 id="login-identity"
                 name="username"
-                autoComplete="username"
+                autoComplete={loginPortal === 'student' ? 'email' : 'username'}
                 required
-                placeholder="e.g. S23BINCE1M04014 or email@iub.edu.pk"
+                placeholder={loginPortal === 'student' ? 'e.g. yourname@gmail.com' : 'e.g. president_cssc, faculty_advisor, superadmin'}
                 value={identity}
                 onChange={(e) => { setIdentity(e.target.value); setError(null); }}
                 style={{
@@ -280,9 +337,14 @@ const Login = () => {
                   outline: 'none', transition: 'border-color 0.2s',
                   '::placeholder': { color: '#475569' }
                 }}
-                onFocus={e => e.target.style.borderColor = '#6366f1'}
+                onFocus={e => e.target.style.borderColor = loginPortal === 'student' ? '#6366f1' : '#8b5cf6'}
                 onBlur={e => e.target.style.borderColor = 'rgba(51,65,85,0.9)'}
               />
+              <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#64748b', fontWeight: 500 }}>
+                {loginPortal === 'student'
+                  ? 'Students must log in using their verified email address and password.'
+                  : 'Presidents, Faculty Advisors, and Super Admins must log in using their assigned username.'}
+              </p>
             </div>
 
             {/* Password Field */}

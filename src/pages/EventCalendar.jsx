@@ -1,3 +1,4 @@
+import { MediaImage } from '../components/common/AuthenticatedMedia';
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { 
@@ -5,6 +6,7 @@ import {
   MapPin, Clock, Tag, X, CheckCircle2, Ticket
 } from 'lucide-react';
 import api from '../utils/api';
+import { getMediaUrl, handleImageError } from '../utils/media';
 
 const EventCalendar = () => {
   const { user } = useContext(AuthContext);
@@ -272,7 +274,14 @@ const EventCalendar = () => {
 
                     <div>
                       <div className="flex items-center gap-2">
-                        {e.society_logo ? <img src={e.society_logo} alt="" className="w-6 h-6 rounded-lg object-cover" /> : null}
+                        {e.society_logo ? (
+                          <MediaImage
+                            src={getMediaUrl(e.society_logo)}
+                            onError={handleImageError}
+                            alt=""
+                            className="w-6 h-6 rounded-lg object-cover"
+                          />
+                        ) : null}
                         <span className="text-[11px] font-extrabold text-indigo-600 uppercase tracking-wider block">{e.society_name}</span>
                       </div>
                       <h3 className="font-bold text-slate-900 text-base">{e.title}</h3>

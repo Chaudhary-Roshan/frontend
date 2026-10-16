@@ -1,3 +1,4 @@
+import { MediaImage } from '../../components/common/AuthenticatedMedia';
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import { AuthContext } from '../../context/AuthContext';
 import api from '../../utils/api';
@@ -37,8 +38,14 @@ const AttendanceManagement = () => {
 
   // Camera Scanner State
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isStartingCamera, setIsStartingCamera] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState('environment'); // 'environment' (rear camera) | 'user' (selfie camera)
   const [cameraError, setCameraError] = useState(null);
   const html5QrCodeRef = useRef(null);
+  const qrFileInputRef = useRef(null);
+
+  const selectedEvent = events.find(e => e.id?.toString() === selectedEventId?.toString());
+  const isEventExpired = selectedEvent ? Boolean(selectedEvent.is_expired || (selectedEvent.date && new Date(selectedEvent.date) < new Date())) : false;
 
   useEffect(() => {
     fetchEvents();
@@ -137,6 +144,10 @@ const AttendanceManagement = () => {
 
   const handleAppointVolunteer = async (e) => {
     e.preventDefault();
+    if (isEventExpired) {
+      alert("Cannot assign gate volunteers to an event that has already concluded.");
+      return;
+    }
     if (!selectedStudentId || !selectedEventId) return;
     setAppointingVolunteer(true);
     try {
@@ -167,6 +178,13 @@ const AttendanceManagement = () => {
 
   const previewTicket = async (rawCode) => {
     if (!rawCode || isProcessing) return;
+    if (isEventExpired) {
+      setScanFeedback({
+        success: false,
+        message: "Gate Check-in Closed: This event has concluded. All tickets and volunteer shifts are now expired."
+      });
+      return;
+    }
     console.log("QR Scanner detected raw payload:", rawCode);
     setIsProcessing(true);
     setScanFeedback(null);
@@ -229,6 +247,13 @@ const AttendanceManagement = () => {
 
   const confirmEntry = async (ticketCode) => {
     if (!ticketCode || isProcessing) return;
+    if (isEventExpired) {
+      setScanFeedback({
+        success: false,
+        message: "Gate Check-in Closed: This event has concluded. All tickets and volunteer shifts are now expired."
+      });
+      return;
+    }
     setIsProcessing(true);
     try {
       const res = await api.post('registrations/scan_ticket/', {
@@ -257,71 +282,204 @@ const AttendanceManagement = () => {
     }
   };
 
-  // Start Camera QR Scanner
-  const startCameraScanner = async () => {
-    setCameraError(null);
+  // Helper to ensure mobile video plays inline without black screen
+  const ensureVideoAttributes = () => {
+    try {
+      const container = document.getElementById("camera-scanner-view");
+      if (!container) return;
+      const videos = container.querySelectorAll("video");
+      videos.forEach(vid => {
+        vid.setAttribute("playsinline", "true");
+        vid.setAttribute("webkit-playsinline", "true");
+        vid.setAttribute("muted", "true");
+        vid.muted = true;
+        vid.setAttribute("autoplay", "true");
+        vid.style.width = "100%";
+        vid.style.height = "100%";
+        vid.style.objectFit = "cover";
+        vid.play().catch(() => {});
+      });
+    } catch (_) {}
+  };
 
-    // 1. Verify HTTPS / localhost origin
+  // Start Camera QR Scanner
+  const startCameraScanner = async (overrideFacing = null) => {
+    setCameraError(null);
+    const targetFacing = overrideFacing || cameraFacing;
+
+    // 1. Verify HTTPS / localhost origin (modern mobile browsers require secure context for MediaDevices)
     if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      setCameraError("Camera blocked: Modern browsers require HTTPS or localhost to access camera devices. Please access this portal over HTTPS or localhost.");
+      setCameraError("Camera requires HTTPS or localhost in modern mobile browsers. If testing on local Wi-Fi, please access via HTTPS or use the 'Snap / Upload QR Photo' button below.");
       return;
     }
 
-    try {
-      const html5QrCode = new Html5Qrcode("camera-scanner-view");
-      html5QrCodeRef.current = html5QrCode;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraError("MediaDevices API is not supported in this browser. Please use Chrome/Safari or use 'Snap / Upload QR Photo' below.");
+      return;
+    }
 
-      const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-      
-      // Try back camera first, fallback to user camera
+    // Clean up any previously attached scanner
+    if (html5QrCodeRef.current) {
       try {
-        await html5QrCode.start(
-          { facingMode: { ideal: "environment" } },
-          config,
-          (decodedText) => {
-            console.log("Camera scanned decodedText:", decodedText);
-            previewTicket(decodedText);
-          },
-          () => {}
-        );
-      } catch (envErr) {
-        console.warn("Back camera unavailable, attempting fallback camera:", envErr);
-        await html5QrCode.start(
-          { facingMode: "user" },
-          config,
-          (decodedText) => {
-            console.log("Camera scanned decodedText:", decodedText);
-            previewTicket(decodedText);
-          },
-          () => {}
-        );
+        if (html5QrCodeRef.current.isScanning) {
+          await html5QrCodeRef.current.stop();
+        }
+        html5QrCodeRef.current.clear();
+      } catch (_) {}
+      html5QrCodeRef.current = null;
+    }
+
+    // 2. Pre-activate container state so DOM element is visible with non-zero dimensions
+    setIsCameraActive(true);
+    setIsStartingCamera(true);
+
+    // Yield control so React renders the scanner DOM node before initializing Html5Qrcode
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    try {
+      const scannerContainer = document.getElementById("camera-scanner-view");
+      if (!scannerContainer) {
+        throw new Error("Scanner viewport container could not be found.");
       }
 
-      setIsCameraActive(true);
+      scannerContainer.innerHTML = '';
+
+      const html5QrCode = new Html5Qrcode("camera-scanner-view", { verbose: false });
+      html5QrCodeRef.current = html5QrCode;
+
+      const config = {
+        fps: 15,
+        qrbox: (viewfinderWidth, viewfinderHeight) => {
+          const edge = Math.min(viewfinderWidth, viewfinderHeight) * 0.75;
+          return { width: Math.max(180, Math.floor(edge)), height: Math.max(180, Math.floor(edge)) };
+        },
+        // DO NOT set fixed aspectRatio: 1.0 because Android/iOS mobile cameras fail on applyConstraints!
+      };
+
+      const onScanSuccess = (decodedText) => {
+        console.log("Camera scanned decodedText:", decodedText);
+        previewTicket(decodedText);
+      };
+
+      let started = false;
+
+      // Method 1: Try direct facingMode ("environment" or "user") as accepted by Html5Qrcode
+      try {
+        const mode = targetFacing === 'user' ? 'user' : 'environment';
+        await html5QrCode.start(
+          { facingMode: mode },
+          config,
+          onScanSuccess,
+          () => {}
+        );
+        started = true;
+      } catch (nativeFacingErr) {
+        console.warn("Direct facingMode constraint failed, falling back to camera enumeration:", nativeFacingErr);
+      }
+
+      // Method 2: If direct facingMode fails, query cameras and select preferred lens with fresh instance
+      if (!started) {
+        try {
+          if (html5QrCode.isScanning) await html5QrCode.stop();
+          html5QrCode.clear();
+        } catch (_) {}
+        scannerContainer.innerHTML = '';
+
+        const freshScanner = new Html5Qrcode("camera-scanner-view", { verbose: false });
+        html5QrCodeRef.current = freshScanner;
+
+        let cameras = [];
+        try {
+          cameras = await Html5Qrcode.getCameras();
+        } catch (camErr) {
+          console.warn("Could not enumerate cameras:", camErr);
+        }
+
+        if (cameras && cameras.length > 0) {
+          const preferredCam = targetFacing === 'environment'
+            ? (cameras.find(c => /back|rear|environment|0/i.test(c.label)) || cameras[cameras.length - 1] || cameras[0])
+            : (cameras.find(c => /front|user|face|1/i.test(c.label)) || cameras[0]);
+          await freshScanner.start(preferredCam.id, config, onScanSuccess, () => {});
+          started = true;
+        } else {
+          // Fallback to basic user camera
+          await freshScanner.start({ facingMode: "user" }, config, onScanSuccess, () => {});
+          started = true;
+        }
+      }
+
+      // Ensure mobile browser video attributes (playsinline, webkit-playsinline, autoplay, muted)
+      ensureVideoAttributes();
+      setTimeout(ensureVideoAttributes, 200);
+      setTimeout(ensureVideoAttributes, 600);
+      setTimeout(ensureVideoAttributes, 1200);
+
+      setIsStartingCamera(false);
     } catch (err) {
       console.error("Camera start error:", err);
       let msg = "Camera access denied or device unavailable. Please ensure camera permissions are allowed in your browser address bar.";
-      if (err?.name === 'NotAllowedError') {
-        msg = "Camera permission was denied. Please click the camera/lock icon in your browser URL bar and allow Camera access.";
-      } else if (err?.name === 'NotFoundError') {
-        msg = "No video input camera detected on this computer/device.";
+      const errStr = String(err?.message || err || '');
+      if (err?.name === 'NotReadableError' || err?.name === 'TrackStartError' || /in use/i.test(errStr) || /hardware/i.test(errStr) || /could not start/i.test(errStr)) {
+        msg = "Camera is in use by another app or browser tab (e.g. background tabs or camera apps). Please close other tabs and tap retry.";
+      } else if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError' || /permission/i.test(errStr) || /denied/i.test(errStr)) {
+        msg = "Camera permission was denied in your browser settings. Tap the lock/site settings in your address bar, set Camera to 'Allow', then tap 'Start In-App Camera' again.";
+      } else if (err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError' || /not found/i.test(errStr)) {
+        msg = "No camera hardware detected on this device. You can use 'Snap / Upload QR Photo' or enter the ticket reference code manually.";
+      } else if (err?.name === 'OverconstrainedError' || /constraint/i.test(errStr)) {
+        msg = "Camera does not support requested facing mode. Tap 'Flip Camera' or use 'Snap / Upload QR Photo'.";
+      } else if (errStr) {
+        msg = `Camera unavailable or unsupported format (${errStr}). You can use 'Snap / Upload QR Photo' below.`;
       }
       setCameraError(msg);
       setIsCameraActive(false);
+      setIsStartingCamera(false);
     }
+  };
+
+  // Flip / Switch Camera
+  const flipCamera = async () => {
+    const nextFacing = cameraFacing === 'environment' ? 'user' : 'environment';
+    setCameraFacing(nextFacing);
+    await stopCameraScanner();
+    await startCameraScanner(nextFacing);
   };
 
   // Stop Camera QR Scanner
   const stopCameraScanner = async () => {
-    if (html5QrCodeRef.current && isCameraActive) {
+    if (html5QrCodeRef.current) {
       try {
-        await html5QrCodeRef.current.stop();
+        if (html5QrCodeRef.current.isScanning) {
+          await html5QrCodeRef.current.stop();
+        }
         html5QrCodeRef.current.clear();
       } catch (err) {
         console.error("Camera stop error:", err);
       }
+      html5QrCodeRef.current = null;
     }
     setIsCameraActive(false);
+    setIsStartingCamera(false);
+  };
+
+  // Image Upload QR Scanner (Fallback for PCs without webcam or permission issues)
+  const handleQrImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCameraError(null);
+    try {
+      let scanner = html5QrCodeRef.current;
+      if (!scanner) {
+        scanner = new Html5Qrcode("camera-scanner-view");
+        html5QrCodeRef.current = scanner;
+      }
+      const decodedText = await scanner.scanFile(file, true);
+      previewTicket(decodedText);
+    } catch (err) {
+      console.warn("Scan file error:", err);
+      setCameraError("Could not detect a QR code in the uploaded image. Please ensure the ticket QR code is clear and in focus.");
+    } finally {
+      if (e.target) e.target.value = '';
+    }
   };
 
   const handleToggleAttendance = async (regId) => {
@@ -427,11 +585,15 @@ const AttendanceManagement = () => {
                 onChange={(e) => setSelectedEventId(e.target.value)}
                 className="mt-0.5 text-base font-black text-slate-900 bg-transparent outline-none cursor-pointer"
               >
-                {events.map(e => (
-                  <option key={e.id} value={e.id}>
-                    {e.title} ({new Date(e.date).toLocaleDateString()}) - {e.society_name}
-                  </option>
-                ))}
+                {events.map(e => {
+                  const expired = e.is_expired || (e.date && new Date(e.date) < new Date());
+                  return (
+                    <option key={e.id} value={e.id}>
+                      {expired ? '⏹ [CONCLUDED] ' : '🟢 '}
+                      {e.title} ({new Date(e.date).toLocaleDateString()}) - {e.society_name}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           </div>
@@ -444,6 +606,23 @@ const AttendanceManagement = () => {
             <Award size={16} /> Finalize Attendance & Generate Bulk Certificates
           </button>
         </div>
+
+        {/* EVENT CONCLUDED / EXPIRED BANNER */}
+        {isEventExpired && (
+          <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 flex items-start sm:items-center gap-3.5 text-amber-900 shadow-xs animate-in fade-in">
+            <div className="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center shrink-0 text-amber-700">
+              <AlertTriangle size={22} />
+            </div>
+            <div className="flex-1">
+              <h4 className="text-sm font-black uppercase tracking-wider text-amber-950 flex items-center gap-2">
+                Event Concluded • Check-in Lanes & Gate Volunteer Shifts Expired
+              </h4>
+              <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">
+                This event took place on <strong>{selectedEvent ? new Date(selectedEvent.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'past date'}</strong>. Active gate scanning and volunteer shifts are now closed. Attendance logs remain preserved below for certificate generation.
+              </p>
+            </div>
+          </div>
+        )}
 
         {certSuccess && (
           <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
@@ -487,10 +666,15 @@ const AttendanceManagement = () => {
 
               <button
                 onClick={openAppointModal}
-                disabled={!selectedEventId}
-                className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-2 shadow-md shadow-indigo-600/20 transition cursor-pointer"
+                disabled={!selectedEventId || isEventExpired}
+                className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition cursor-pointer shadow-md ${
+                  isEventExpired
+                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                    : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20'
+                }`}
+                title={isEventExpired ? "Cannot assign volunteers to a concluded event" : "Appoint Gate Volunteer"}
               >
-                <UserPlus size={16} /> Appoint Gate Volunteer
+                <UserPlus size={16} /> {isEventExpired ? "Volunteers Locked (Event Concluded)" : "Appoint Gate Volunteer"}
               </button>
             </div>
 
@@ -506,7 +690,7 @@ const AttendanceManagement = () => {
                   <div key={v.id} className="p-4 rounded-2xl border border-slate-100 bg-slate-50 flex items-center justify-between gap-3 shadow-xs">
                     <div className="flex items-center gap-3 min-w-0">
                       {v.volunteer_photo ? (
-                        <img src={v.volunteer_photo} alt={v.volunteer_name} className="w-10 h-10 rounded-xl object-cover border border-slate-200 shrink-0" />
+                        <MediaImage src={v.volunteer_photo} alt={v.volunteer_name} className="w-10 h-10 rounded-xl object-cover border border-slate-200 shrink-0" />
                       ) : (
                         <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 font-black text-sm flex items-center justify-center border border-indigo-200 shrink-0">
                           {v.volunteer_name?.charAt(0) || 'V'}
@@ -515,9 +699,15 @@ const AttendanceManagement = () => {
                       <div className="min-w-0 truncate">
                         <p className="font-bold text-slate-900 text-xs truncate">{v.volunteer_name || v.volunteer_username}</p>
                         <p className="text-[10px] text-slate-500 font-mono truncate">{v.volunteer_roll ? `Roll: ${v.volunteer_roll}` : `@${v.volunteer_username}`}</p>
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md mt-1 border border-indigo-200">
-                          <MapPin size={10} /> {v.gate_name || 'Gate 1'}
-                        </span>
+                        {isEventExpired ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-200/80 px-2 py-0.5 rounded-md mt-1 border border-slate-300">
+                            <Clock size={10} /> Shift Expired / Concluded
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md mt-1 border border-indigo-200">
+                            <MapPin size={10} /> {v.gate_name || 'Gate 1'}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <button
@@ -536,7 +726,28 @@ const AttendanceManagement = () => {
 
         {/* IN-APP CAMERA SCANNER & RAPID INPUT CONSOLE */}
         <div className="bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950 text-white rounded-3xl p-6 sm:p-8 shadow-xl">
-          <div className="max-w-2xl mx-auto space-y-6 text-center">
+          {isEventExpired ? (
+            <div className="max-w-xl mx-auto py-10 text-center space-y-4">
+              <div className="w-16 h-16 rounded-3xl bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mx-auto shadow-inner">
+                <Clock size={32} />
+              </div>
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-rose-300 bg-rose-950/80 px-3 py-1 rounded-full border border-rose-500/40">
+                  Gate Check-In Lane Expired
+                </span>
+                <h2 className="text-2xl font-black tracking-tight mt-2 text-white">Event Concluded & Check-In Closed</h2>
+                <p className="text-xs text-slate-300 max-w-md mx-auto mt-2 leading-relaxed">
+                  This event took place on <strong>{selectedEvent ? new Date(selectedEvent.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'past date'}</strong>. Attendance lanes, gate volunteer duties, and ticket scanning for this session are expired.
+                </p>
+              </div>
+              <div className="pt-2">
+                <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-3.5 py-1.5 rounded-full inline-flex items-center gap-1.5">
+                  <Award size={13} /> Finalized attendance list and certificate generation remains open above
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-2xl mx-auto space-y-6 text-center">
             
             <div className="flex items-center justify-center gap-2">
               <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 bg-emerald-950/80 px-3 py-1 rounded-full border border-emerald-500/40">
@@ -550,49 +761,89 @@ const AttendanceManagement = () => {
             </p>
 
             {/* CAMERA STREAM VIEWPORT */}
-            <div className="max-w-sm mx-auto overflow-hidden rounded-3xl border-2 border-indigo-500/40 bg-black/40 shadow-inner p-2 relative">
-              <div id="camera-scanner-view" className="w-full rounded-2xl overflow-hidden min-h-[200px] flex items-center justify-center bg-slate-900/60">
-                {!isCameraActive && (
-                  <div className="p-8 text-slate-400 text-xs flex flex-col items-center gap-2">
-                    <Camera size={36} className="text-slate-500" />
-                    <span>Camera is currently off. Click below to activate viewfinder.</span>
-                  </div>
-                )}
-              </div>
+            <div className="max-w-sm w-full mx-auto overflow-hidden rounded-3xl border-2 border-indigo-500/40 bg-black shadow-inner p-2 relative min-h-[260px] sm:min-h-[300px] flex items-center justify-center">
+              <div 
+                id="camera-scanner-view" 
+                className="w-full h-full min-h-[240px] rounded-2xl overflow-hidden bg-black relative" 
+              />
+              
+              {!isCameraActive && (
+                <div className="absolute inset-2 z-10 bg-black/95 rounded-2xl p-8 text-slate-400 text-xs flex flex-col items-center justify-center gap-2 text-center">
+                  <Camera size={38} className="text-slate-500 mb-1" />
+                  <span className="font-semibold text-slate-300">Camera is currently off.</span>
+                  <span className="text-[11px] text-slate-400">Tap below to activate camera or snap a photo of the ticket QR.</span>
+                </div>
+              )}
 
-              {isCameraActive && (
+              {isCameraActive && isStartingCamera && (
+                <div className="absolute inset-0 z-20 bg-black/85 flex flex-col items-center justify-center gap-2.5 text-white text-xs font-bold p-4">
+                  <div className="w-8 h-8 border-3 border-emerald-400 border-t-transparent rounded-full animate-spin"></div>
+                  <span>Connecting camera sensor...</span>
+                  <span className="text-[10px] text-slate-400 font-normal">Opening {cameraFacing === 'environment' ? 'rear autofocus camera' : 'front camera'}</span>
+                </div>
+              )}
+
+              {isCameraActive && !isStartingCamera && (
                 <div className="absolute top-4 left-4 z-10 flex items-center gap-1.5 bg-emerald-500/90 text-emerald-950 text-[10px] font-black px-2.5 py-0.5 rounded-full shadow">
                   <span className="w-2 h-2 rounded-full bg-emerald-950 animate-pulse"></span>
-                  SCANNING LIVE
+                  SCANNING LIVE ({cameraFacing === 'environment' ? 'REAR' : 'FRONT'})
                 </div>
               )}
             </div>
 
             {cameraError && (
-              <div className="p-3 bg-amber-500/20 border border-amber-400/40 text-amber-200 rounded-xl text-xs max-w-md mx-auto">
-                {cameraError}
+              <div className="p-3.5 bg-amber-500/20 border border-amber-400/40 text-amber-200 rounded-2xl text-xs max-w-md mx-auto leading-relaxed text-left flex items-start gap-2.5">
+                <AlertTriangle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                <span>{cameraError}</span>
               </div>
             )}
 
-            {/* CAMERA CONTROLS */}
-            <div className="flex justify-center gap-3">
+            {/* CAMERA CONTROLS & PHOTO UPLOAD */}
+            <div className="flex flex-wrap justify-center gap-2.5 sm:gap-3">
               {!isCameraActive ? (
                 <button
                   type="button"
-                  onClick={startCameraScanner}
+                  onClick={() => startCameraScanner()}
                   className="bg-emerald-500 hover:bg-emerald-400 text-emerald-950 px-6 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider transition shadow-lg shadow-emerald-500/30 flex items-center gap-2 cursor-pointer"
                 >
                   <Camera size={16} /> Start In-App Camera
                 </button>
               ) : (
-                <button
-                  type="button"
-                  onClick={stopCameraScanner}
-                  className="bg-rose-500 hover:bg-rose-400 text-white px-6 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider transition shadow-lg shadow-rose-500/30 flex items-center gap-2 cursor-pointer"
-                >
-                  <VideoOff size={16} /> Turn Off Camera
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={stopCameraScanner}
+                    className="bg-rose-500 hover:bg-rose-400 text-white px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider transition shadow-lg shadow-rose-500/30 flex items-center gap-2 cursor-pointer"
+                  >
+                    <VideoOff size={16} /> Turn Off Camera
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={flipCamera}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider transition shadow-lg shadow-indigo-600/30 flex items-center gap-2 cursor-pointer"
+                    title="Flip between front and rear camera"
+                  >
+                    <RefreshCw size={15} /> Flip Camera
+                  </button>
+                </>
               )}
+
+              <input
+                ref={qrFileInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleQrImageUpload}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => qrFileInputRef.current?.click()}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-5 py-2.5 rounded-2xl font-bold text-xs flex items-center gap-2 transition cursor-pointer"
+              >
+                <QrCode size={16} className="text-indigo-400" /> Snap / Upload QR Photo
+              </button>
             </div>
 
             {/* GATE PASS ATTENDEE IDENTITY VERIFICATION CARD */}
@@ -601,7 +852,7 @@ const AttendanceManagement = () => {
                 <div className="flex items-start justify-between border-b border-slate-100 pb-4">
                   <div className="flex items-center gap-3.5">
                     {ticketPreview.photo_url ? (
-                      <img 
+                      <MediaImage 
                         src={ticketPreview.photo_url} 
                         alt={ticketPreview.student_name}
                         className="w-16 h-16 rounded-2xl object-cover border-2 border-indigo-500 shadow-md"
@@ -722,6 +973,7 @@ const AttendanceManagement = () => {
             </div>
 
           </div>
+          )}
         </div>
 
         {/* ATTENDEE ROSTER TABLE */}
@@ -766,7 +1018,7 @@ const AttendanceManagement = () => {
                       <td className="py-3.5 px-4 font-bold text-slate-900">
                         <div className="flex items-center gap-3">
                           {reg.student_avatar ? (
-                            <img
+                            <MediaImage
                               src={reg.student_avatar}
                               alt={reg.student_name}
                               className="w-8 h-8 rounded-full object-cover border border-slate-200 shrink-0"

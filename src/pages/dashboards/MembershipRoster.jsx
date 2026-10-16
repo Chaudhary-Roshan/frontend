@@ -1,3 +1,4 @@
+import { MediaImage } from '../../components/common/AuthenticatedMedia';
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../../context/AuthContext';
 import api from '../../utils/api';
@@ -175,7 +176,7 @@ const MembershipRoster = () => {
             <div className="text-center mb-6">
               <div className="w-20 h-20 bg-violet-100 text-violet-600 rounded-3xl mx-auto flex items-center justify-center font-black text-3xl mb-4 shadow-inner">
                 {selectedMember.student_avatar ? (
-                  <img src={selectedMember.student_avatar} alt="Profile" className="w-full h-full object-cover rounded-3xl" />
+                  <MediaImage src={selectedMember.student_avatar} alt="Profile" className="w-full h-full object-cover rounded-3xl" />
                 ) : (selectedMember.student_name || 'U')[0].toUpperCase()}
               </div>
               <h2 className="text-2xl font-black text-slate-900">{selectedMember.student_name || selectedMember.student_username}</h2>

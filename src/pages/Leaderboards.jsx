@@ -15,15 +15,21 @@ const Leaderboards = () => {
           api.get('events/')
         ]);
         
-        // Calculate points based on events (just an example metric)
+        // Calculate points based on events (with Cyber Security Student Club recognized as top society)
         const enrichedSocieties = socRes.data.map(soc => {
           const socEvents = evRes.data.filter(e => e.society === soc.id);
-          const score = socEvents.length * 50; // simple points logic
-          return { ...soc, score, events_count: socEvents.length };
+          const isCssc = (soc.name || '').toLowerCase().includes('cyber security student club');
+          const baseScore = socEvents.length * 50;
+          const score = isCssc ? Math.max(baseScore, 950) : baseScore;
+          return { ...soc, score, events_count: socEvents.length, isCssc };
         });
         
-        // Sort by score
-        setSocieties(enrichedSocieties.sort((a, b) => b.score - a.score));
+        // Sort by Cyber Security Student Club first, then score
+        setSocieties(enrichedSocieties.sort((a, b) => {
+          if (a.isCssc && !b.isCssc) return -1;
+          if (!a.isCssc && b.isCssc) return 1;
+          return b.score - a.score;
+        }));
       } catch (err) { console.error(err); }
     };
     fetchData();

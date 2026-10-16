@@ -1,24 +1,33 @@
-import React, { useContext, useEffect, useState } from 'react';
+import { MediaLink, MediaImage } from '../../components/common/AuthenticatedMedia';
+import React, { useContext, useEffect, useState, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { AuthContext } from '../../context/AuthContext';
 import { 
   CheckSquare, Award, Users, CheckCircle, BarChart, 
   Calendar, Megaphone, PlusCircle, QrCode, ShieldCheck, 
   CreditCard, Clock, CheckCircle2, XCircle, ArrowRight,
-  FileText, ExternalLink, Eye, AlertCircle, X, Check, UserPlus
+  FileText, ExternalLink, Eye, AlertCircle, X, Check, UserPlus,
+  User, Edit3, Trash2, Loader2, Download
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import api from '../../utils/api';
 import EventProposalDocumentModal from '../../components/modals/EventProposalDocumentModal';
+import { generateOfficialProposalPDF } from '../../utils/officialPdfGenerator';
 import PaymentVerificationDesk from '../../components/ticketing/PaymentVerificationDesk';
 import ManualTicketingHub from '../../components/ticketing/ManualTicketingHub';
+import ExecutiveProfileModal from '../../components/modals/ExecutiveProfileModal';
 import { getMediaUrl } from '../../utils/media';
+import { sortSocietyMembers } from '../../utils/hierarchy';
 
 const AdvisorDashboard = () => {
   const { user } = useContext(AuthContext);
   const [society, setSociety] = useState(null);
   const [pendingRegs, setPendingRegs] = useState([]);
   const [events, setEvents] = useState([]);
+  const [deleteEventTarget, setDeleteEventTarget] = useState(null);
+  const [isDeletingEvent, setIsDeletingEvent] = useState(false);
+  const [deleteProposalTarget, setDeleteProposalTarget] = useState(null);
+  const [isDeletingProposal, setIsDeletingProposal] = useState(false);
   const [pendingEventProposals, setPendingEventProposals] = useState([]);
   const [proposals, setProposals] = useState([]);
   const [selectedProposalDoc, setSelectedProposalDoc] = useState(null);
@@ -37,9 +46,10 @@ const AdvisorDashboard = () => {
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
 
   // Modals
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [showEventModal, setShowEventModal] = useState(false);
   const [eventForm, setEventForm] = useState({
-    title: '', description: '', date: '', is_paid: false, price: 0, venue: ''
+    title: '', description: '', date: '', is_paid: false, price: 0, venue: '', society: ''
   });
   const [showNewsModal, setShowNewsModal] = useState(false);
   const [newsForm, setNewsForm] = useState({ title: '', content: '' });
@@ -78,78 +88,160 @@ const AdvisorDashboard = () => {
 
   const [toastMsg, setToastMsg] = useState(null);
 
+  const handleDeleteEvent = async () => {
+    if (!deleteEventTarget) return;
+    try {
+      setIsDeletingEvent(true);
+      await api.delete(`events/${deleteEventTarget.id}/`);
+      setEvents(prev => prev.filter(e => e.id !== deleteEventTarget.id));
+      setProposals(prev => prev.filter(p => p.event !== deleteEventTarget.id && p.proposal_no !== deleteEventTarget.proposal_doc_number));
+      showToast(`Event "${deleteEventTarget.title}" deleted.`);
+      setDeleteEventTarget(null);
+    } catch (err) {
+      console.error("Delete event failed:", err);
+      alert(err.response?.data?.error || err.response?.data?.detail || "Failed to delete event.");
+    } finally {
+      setIsDeletingEvent(false);
+    }
+  };
+
+  const handleDeleteProposal = async () => {
+    if (!deleteProposalTarget) return;
+    try {
+      setIsDeletingProposal(true);
+      await api.delete(`proposals/${deleteProposalTarget.id}/`);
+      setProposals(prev => prev.filter(p => p.id !== deleteProposalTarget.id));
+      setEvents(prev => prev.filter(e => e.proposal_doc_number !== deleteProposalTarget.proposal_no));
+      showToast(`Proposal "${deleteProposalTarget.event_title || deleteProposalTarget.title}" deleted.`);
+      setDeleteProposalTarget(null);
+    } catch (err) {
+      console.error("Delete proposal failed:", err);
+      alert(err.response?.data?.error || err.response?.data?.detail || "Failed to delete proposal.");
+    } finally {
+      setIsDeletingProposal(false);
+    }
+  };
+
+  const activeReqIdRef = useRef(0);
+  const abortControllerRef = useRef(null);
+  const [scopeLoading, setScopeLoading] = useState(false);
+
   useEffect(() => {
-    fetchData();
-  }, [user, selectedSocietyId]);
+    // Clear previous society displayed data and show loading state
+    setSociety(null);
+    setReport(null);
+    setEvents([]);
+    setPendingEventProposals([]);
+    setPendingRegs([]);
+    setCabinet([]);
+    setProposals([]);
+    setCertificateTemplates([]);
+    setScopeLoading(true);
+
+    fetchData(selectedSocietyId);
+
+    const handleSync = () => {
+      fetchData(selectedSocietyId);
+    };
+
+    window.addEventListener('dsms:data_synced', handleSync);
+    return () => {
+      window.removeEventListener('dsms:data_synced', handleSync);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [selectedSocietyId]);
 
   const showToast = (msg) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 4000);
   };
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = async (scopeToFetch = selectedSocietyId) => {
+    // Abort previous in-flight requests to eliminate race conditions
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const reqId = ++activeReqIdRef.current;
+
     try {
-      const [socRes, regRes, evtRes, cabRes, venRes, propRes, sigRes, tmplRes] = await Promise.allSettled([
-        api.get('societies/'),
-        api.get('registrations/'),
-        api.get('events/'),
-        api.get('cabinet/'),
-        api.get('venues/'),
-        api.get('proposals/'),
-        api.get('signatures/'),
-        api.get('certificate-templates/')
-      ]);
+      const socRes = await api.get('societies/', { signal: controller.signal });
+      if (reqId !== activeReqIdRef.current) return;
 
       let mySocs = [];
-      if (socRes.status === 'fulfilled') {
-        if (user?.role === 'admin') {
-          mySocs = socRes.value.data;
-        } else {
-          mySocs = socRes.value.data.filter(s => 
-            s.advisor === user?.id || 
-            s.advisor === Number(user?.id) || 
-            s.id === user?.society || 
-            s.id === Number(user?.society)
+      if (user?.role === 'admin') {
+        mySocs = socRes.data;
+      } else {
+        const userAdvisedIds = (user?.advised_society_ids || []).map(Number);
+        mySocs = socRes.data.filter(s => {
+          const advId = typeof s.advisor === 'object' ? s.advisor?.id : s.advisor;
+          const socId = Number(s.id);
+          return (
+            advId === user?.id || 
+            Number(advId) === Number(user?.id) || 
+            socId === Number(user?.society) || 
+            userAdvisedIds.includes(socId)
           );
-        }
-        setAssignedSocieties(mySocs);
+        });
+      }
+      setAssignedSocieties(mySocs);
 
-        let activeSoc = null;
-        if (selectedSocietyId !== 'all') {
-          activeSoc = mySocs.find(s => s.id === Number(selectedSocietyId)) || mySocs[0] || null;
-        } else {
-          activeSoc = mySocs[0] || null;
-        }
-        setSociety(activeSoc);
+      let activeSoc = null;
+      if (scopeToFetch !== 'all') {
+        // Strictly match the requested society database ID without any other society fallback
+        activeSoc = mySocs.find(s => String(s.id) === String(scopeToFetch)) || null;
+      }
+      setSociety(activeSoc);
 
-        if (activeSoc) {
-          setBankForm({
-            bank_name: activeSoc.bank_name || '',
-            bank_account_title: activeSoc.bank_account_title || '',
-            bank_account_number: activeSoc.bank_account_number || '',
-            payment_instructions: activeSoc.payment_instructions || ''
-          });
-        }
+      if (activeSoc) {
+        setBankForm({
+          bank_name: activeSoc.bank_name || '',
+          bank_account_title: activeSoc.bank_account_title || '',
+          bank_account_number: activeSoc.bank_account_number || '',
+          payment_instructions: activeSoc.payment_instructions || ''
+        });
       }
 
-      const assignedSocIds = mySocs.map(s => s.id);
-      const targetSocIds = selectedSocietyId !== 'all' ? [Number(selectedSocietyId)] : assignedSocIds;
+      // Query endpoints with explicit society query param
+      const queryParams = scopeToFetch !== 'all' ? { society: scopeToFetch } : {};
+      const [regRes, evtRes, cabRes, venRes, propRes, sigRes, tmplRes] = await Promise.allSettled([
+        api.get('registrations/', { params: queryParams, signal: controller.signal }),
+        api.get('events/', { params: queryParams, signal: controller.signal }),
+        api.get('cabinet/', { params: queryParams, signal: controller.signal }),
+        api.get('venues/', { signal: controller.signal }),
+        api.get('proposals/', { params: queryParams, signal: controller.signal }),
+        api.get('signatures/', { signal: controller.signal }),
+        api.get('certificate-templates/', { params: queryParams, signal: controller.signal })
+      ]);
+
+      if (reqId !== activeReqIdRef.current) return;
+
+      const targetSocIds = scopeToFetch !== 'all' ? [Number(scopeToFetch)] : mySocs.map(s => Number(s.id));
+      const isInTarget = (socVal) => {
+        if (socVal === null || socVal === undefined) return false;
+        const id = typeof socVal === 'object' ? socVal.id : socVal;
+        return targetSocIds.includes(Number(id));
+      };
 
       if (regRes.status === 'fulfilled') {
-        const filteredRegs = regRes.value.data.filter(r => targetSocIds.includes(r.society_id) || targetSocIds.includes(r.event_society));
+        const filteredRegs = regRes.value.data.filter(r => 
+          isInTarget(r.society_id) || isInTarget(r.society) || isInTarget(r.event_society)
+        );
         setPendingRegs(filteredRegs.filter(r => r.payment_status === 'pending'));
       }
-      
+
       if (evtRes.status === 'fulfilled') {
-        const socEvents = evtRes.value.data.filter(e => targetSocIds.includes(e.society));
+        const socEvents = evtRes.value.data.filter(e => isInTarget(e.society));
         setEvents(socEvents);
         setPendingEventProposals(socEvents.filter(e => e.status === 'pending'));
       }
 
       if (cabRes.status === 'fulfilled') {
-        const socCab = cabRes.value.data.filter(c => targetSocIds.includes(c.society));
-        setCabinet(socCab.filter(c => !c.is_verified));
+        const socCab = cabRes.value.data.filter(c => isInTarget(c.society));
+        setCabinet(sortSocietyMembers(socCab.filter(c => !c.is_verified)));
       }
 
       if (venRes.status === 'fulfilled') {
@@ -157,7 +249,7 @@ const AdvisorDashboard = () => {
       }
 
       if (propRes.status === 'fulfilled') {
-        const socProps = propRes.value.data.filter(p => targetSocIds.includes(p.society));
+        const socProps = propRes.value.data.filter(p => isInTarget(p.society));
         setProposals(socProps);
       }
 
@@ -166,20 +258,64 @@ const AdvisorDashboard = () => {
       }
 
       if (tmplRes.status === 'fulfilled') {
-        const filteredTemplates = tmplRes.value.data.filter(t => targetSocIds.includes(t.society));
+        const filteredTemplates = tmplRes.value.data.filter(t => isInTarget(t.society));
         setCertificateTemplates(filteredTemplates);
       }
 
-      if (society) {
+      // Fetch statistics report
+      if (activeSoc) {
         try {
-          const repRes = await api.get(`societies/${society.id}/report/`);
-          setReport(repRes.data);
-        } catch(e){}
+          const repRes = await api.get(`societies/${activeSoc.id}/report/`, { signal: controller.signal });
+          if (reqId === activeReqIdRef.current) {
+            setReport(repRes.data);
+          }
+        } catch (e) {
+          if (reqId === activeReqIdRef.current) setReport(null);
+        }
+      } else if (scopeToFetch === 'all' && mySocs.length > 0) {
+        // Aggregate statistics across all assigned societies
+        try {
+          const reports = await Promise.allSettled(
+            mySocs.map(s => api.get(`societies/${s.id}/report/`, { signal: controller.signal }))
+          );
+          if (reqId === activeReqIdRef.current) {
+            let totalEvents = 0;
+            let totalMembers = 0;
+            let totalRevenue = 0;
+            let totalHealth = 0;
+            let validCount = 0;
+            reports.forEach(r => {
+              if (r.status === 'fulfilled' && r.value.data) {
+                totalEvents += r.value.data.total_events || 0;
+                totalMembers += r.value.data.active_members || 0;
+                totalRevenue += r.value.data.total_revenue || 0;
+                totalHealth += r.value.data.health_score || 0;
+                validCount++;
+              }
+            });
+            setReport({
+              society: `All Assigned Societies (${mySocs.length})`,
+              total_events: totalEvents,
+              active_members: totalMembers,
+              total_revenue: totalRevenue,
+              health_score: validCount > 0 ? Math.round(totalHealth / validCount) : 100
+            });
+          }
+        } catch (e) {
+          if (reqId === activeReqIdRef.current) setReport(null);
+        }
+      } else {
+        setReport(null);
       }
     } catch (e) {
-      console.error(e);
+      if (e.name !== 'CanceledError' && e.name !== 'AbortError') {
+        console.error("AdvisorDashboard fetchData error:", e);
+      }
     } finally {
-      setLoading(false);
+      if (reqId === activeReqIdRef.current) {
+        setLoading(false);
+        setScopeLoading(false);
+      }
     }
   };
 
@@ -335,10 +471,11 @@ const AdvisorDashboard = () => {
 
   const handleCreateEvent = async (e) => {
     e.preventDefault();
-    if (!society) return;
+    const targetSocId = eventForm.society ? parseInt(eventForm.society) : (society?.id || assignedSocieties[0]?.id);
+    if (!targetSocId) return;
     try {
       await api.post('events/', {
-        society: society.id,
+        society: targetSocId,
         title: eventForm.title,
         description: eventForm.description,
         date: eventForm.date,
@@ -348,7 +485,7 @@ const AdvisorDashboard = () => {
       });
       showToast("Event created and automatically approved by Faculty Advisor!");
       setShowEventModal(false);
-      setEventForm({ title: '', description: '', date: '', is_paid: false, price: 0, venue: '' });
+      setEventForm({ title: '', description: '', date: '', is_paid: false, price: 0, venue: '', society: '' });
       fetchData();
     } catch (err) {
       alert(err.response?.data?.date || err.response?.data?.title || 'Failed to create event. Date may be locked by another society.');
@@ -505,7 +642,9 @@ const AdvisorDashboard = () => {
                 Faculty Advisor Portal
               </span>
               <span className="text-xs font-bold text-slate-400">
-                {society ? society.name : 'Assigned Departmental Societies'}
+                {selectedSocietyId === 'all' 
+                  ? `All Assigned Societies (${assignedSocieties.length})` 
+                  : (society ? society.name : (scopeLoading ? 'Loading society...' : 'Assigned Society'))}
               </span>
             </div>
             <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight mt-2 flex items-center gap-3">
@@ -514,6 +653,40 @@ const AdvisorDashboard = () => {
             <p className="text-slate-500 text-sm mt-1 max-w-2xl font-medium">
               Review and approve event proposals, verify paid ticket receipts, manage official society bank accounts, and endorse credentials.
             </p>
+
+            {/* ADVISOR PROFILE SUMMARY */}
+            <div className="flex items-center gap-2.5 mt-3 pt-3 border-t border-slate-100">
+              {user?.avatar_url || user?.profile_photo_url ? (
+                <div className="w-8 h-8 rounded-full overflow-hidden border border-indigo-200 shrink-0 shadow-xs">
+                  <MediaImage
+                    src={getMediaUrl(user.avatar_url || user.profile_photo_url)}
+                    alt={user.full_name || user.username}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs shrink-0">
+                  {(user?.first_name || user?.username || 'A').charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div className="text-xs">
+                <span className="font-bold text-slate-800">
+                  {user?.full_name || (user?.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : user?.username)}
+                </span>
+                {user?.department && (
+                  <span className="text-slate-500 font-medium ml-1.5">
+                    • {user.department}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowProfileModal(true)}
+                className="ml-auto text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer transition"
+              >
+                <Edit3 size={12} /> Edit Profile
+              </button>
+            </div>
 
             {/* MULTI-SOCIETY SCOPE SELECTOR */}
             {assignedSocieties.length > 0 && (
@@ -534,6 +707,14 @@ const AdvisorDashboard = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setShowProfileModal(true)}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-2xl font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/30 transition cursor-pointer"
+              title="Edit Faculty Advisor Profile & Photo"
+            >
+              <User size={15} /> Edit Advisor Profile
+            </button>
             {society && (
               <button
                 onClick={() => setShowBankModal(true)}
@@ -551,7 +732,10 @@ const AdvisorDashboard = () => {
               <ShieldCheck size={15} /> Advisor Signature
             </button>
             <button
-              onClick={() => setShowEventModal(true)}
+              onClick={() => {
+                setEventForm(prev => ({ ...prev, society: selectedSocietyId !== 'all' ? selectedSocietyId : '' }));
+                setShowEventModal(true);
+              }}
               className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-2xl font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/30 transition cursor-pointer"
             >
               <PlusCircle size={15} /> Propose Event
@@ -569,7 +753,7 @@ const AdvisorDashboard = () => {
               <QrCode size={15} /> Scanner
             </Link>
             <Link
-              to="/president/recruitments"
+              to={selectedSocietyId !== 'all' ? `/president/recruitments?society=${selectedSocietyId}` : "/president/recruitments"}
               className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-2xl font-bold text-xs flex items-center gap-1.5 shadow-md shadow-purple-600/30 transition"
             >
               <UserPlus size={15} /> Recruitment Drives
@@ -584,10 +768,12 @@ const AdvisorDashboard = () => {
         </div>
 
         {/* HEALTH KPI REPORT */}
-        {report && (
+        {report ? (
           <div className="bg-slate-900 rounded-3xl shadow-xl border border-slate-800 p-8 text-white grid grid-cols-2 md:grid-cols-5 gap-6">
             <div>
-              <p className="text-slate-400 font-bold text-xs uppercase tracking-wider">Assigned Society</p>
+              <p className="text-slate-400 font-bold text-xs uppercase tracking-wider">
+                {selectedSocietyId === 'all' ? 'Active Scope' : 'Assigned Society'}
+              </p>
               <p className="text-xl font-extrabold mt-1 truncate">{report.society}</p>
             </div>
             <div>
@@ -607,6 +793,13 @@ const AdvisorDashboard = () => {
                 Society Index
               </p>
               <p className="text-2xl font-extrabold text-indigo-400 mt-1">{report.health_score}/100</p>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-slate-900/60 rounded-3xl border border-slate-800 p-8 text-white flex items-center justify-center">
+            <div className="flex items-center gap-3 text-slate-400 text-sm font-bold">
+              <div className="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
+              <span>{scopeLoading ? 'Loading society statistics...' : 'Select a society to inspect statistics'}</span>
             </div>
           </div>
         )}
@@ -653,12 +846,15 @@ const AdvisorDashboard = () => {
                   <div key={prop.id} className="border border-indigo-100 bg-indigo-50/20 rounded-2xl p-5 flex flex-col justify-between hover:shadow-md transition">
                     <div>
                       <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-100 px-2.5 py-0.5 rounded-full">
                             {prop.proposal_no}
                           </span>
                           <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
                             {prop.event_type || 'Seminar & Workshop'}
+                          </span>
+                          <span className="text-[10px] font-bold text-indigo-800 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-full">
+                            {prop.society_name || assignedSocieties.find(s => s.id === prop.society)?.name || 'Society'}
                           </span>
                         </div>
                         <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full border ${statusColor}`}>
@@ -710,23 +906,45 @@ const AdvisorDashboard = () => {
                     </div>
 
                     <div className="mt-5 pt-3 border-t border-indigo-100/60 flex flex-wrap items-center justify-between gap-2">
-                      <button
-                        onClick={() => setSelectedProposalDoc(prop)}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition cursor-pointer flex items-center gap-1.5"
-                      >
-                        <Eye size={14} /> Review & Sign Statutory Dossier
-                      </button>
-
-                      {hasSignedDoc && (
-                        <a
-                          href={getMediaUrl(prop.signed_proposal_file)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold text-xs rounded-xl transition flex items-center gap-1"
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            const safeNo = (prop.proposal_no || 'Dossier').replace(/[^a-zA-Z0-9_-]/g, '_');
+                            generateOfficialProposalPDF(prop, `Event_Proposal_${safeNo}.pdf`);
+                          }}
+                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm transition cursor-pointer flex items-center gap-1.5"
+                          title="Download official PDF proposal dossier directly"
                         >
-                          <ExternalLink size={12} /> View Scan
-                        </a>
-                      )}
+                          <Download size={14} /> Download PDF
+                        </button>
+
+                        <button
+                          onClick={() => setSelectedProposalDoc(prop)}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition cursor-pointer flex items-center gap-1.5"
+                        >
+                          <Eye size={14} /> Review & Sign Statutory Dossier
+                        </button>
+
+                        {hasSignedDoc && (
+                          <MediaLink
+                            href={getMediaUrl(prop.signed_proposal_file)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold text-xs rounded-xl transition flex items-center gap-1"
+                          >
+                            <ExternalLink size={12} /> View Scan
+                          </MediaLink>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setDeleteProposalTarget(prop)}
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-xl transition cursor-pointer"
+                        title="Delete Proposal"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </div>
                 );
@@ -751,7 +969,7 @@ const AdvisorDashboard = () => {
                 {pendingRegs.map(reg => (
                   <div key={reg.id} className="p-4 rounded-2xl border border-amber-200 bg-amber-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="space-y-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <h4 className="font-bold text-slate-900 text-sm">{reg.student_name}</h4>
                         <span className="text-[10px] font-mono text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
                           {reg.student_roll_number || 'Student'}
@@ -759,6 +977,11 @@ const AdvisorDashboard = () => {
                         <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
                           Bank v{reg.bank_snapshot?.version || reg.bank_version || 1}
                         </span>
+                        {(reg.society_name || assignedSocieties.find(s => s.id === (r => r.society_id || r.society)(reg))?.name) && (
+                          <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full">
+                            {reg.society_name || assignedSocieties.find(s => s.id === (reg.society_id || reg.society))?.name}
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-slate-600 font-medium">
                         Event: <strong className="text-slate-900">{reg.event_title}</strong> (PKR {reg.event_price || '10.00'})
@@ -884,13 +1107,23 @@ const AdvisorDashboard = () => {
                           </span>
                         )}
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleGenerateCerts(evt.id, eventTemplate?.id)}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition cursor-pointer"
-                      >
-                        Issue Bulk Certs
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleGenerateCerts(evt.id, eventTemplate?.id)}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition cursor-pointer"
+                        >
+                          Issue Bulk Certs
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteEventTarget(evt)}
+                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"
+                          title="Delete Event"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
                     </div>
                   );
                 })
@@ -915,6 +1148,9 @@ const AdvisorDashboard = () => {
                   <div>
                     <h4 className="font-bold text-slate-900 text-sm">{member.username}</h4>
                     <p className="text-xs font-bold text-indigo-600">{member.role_title} ({member.term_year})</p>
+                    <p className="text-[10px] font-medium text-slate-500 mt-0.5">
+                      {member.society_name || assignedSocieties.find(s => s.id === member.society)?.name || ''}
+                    </p>
                   </div>
                   <button
                     onClick={() => handleVerifyCabinet(member.id)}
@@ -944,6 +1180,21 @@ const AdvisorDashboard = () => {
             <p className="text-xs text-slate-500 mb-5">Events created by the Faculty Advisor are published automatically subject to Date-Lock rule.</p>
 
             <form onSubmit={handleCreateEvent} className="space-y-4">
+              {assignedSocieties.length > 1 && (
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Target Society *</label>
+                  <select
+                    value={eventForm.society || society?.id || assignedSocieties[0]?.id || ''}
+                    onChange={e => setEventForm({...eventForm, society: e.target.value})}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
+                  >
+                    {assignedSocieties.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Event Title</label>
                 <input
@@ -1164,21 +1415,21 @@ const AdvisorDashboard = () => {
                   <FileText size={15} className="text-indigo-600" /> Uploaded Physical Sign-Off Document
                 </h4>
                 {selectedProposalForVerify.signed_proposal_doc && (
-                  <a
+                  <MediaLink
                     href={selectedProposalForVerify.signed_proposal_doc}
                     target="_blank"
                     rel="noreferrer"
                     className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
                   >
                     Open Full Document <ExternalLink size={12} />
-                  </a>
+                  </MediaLink>
                 )}
               </div>
 
               {selectedProposalForVerify.signed_proposal_doc ? (
                 <div className="mt-3">
                   <div className="max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 flex items-center justify-center">
-                    <img
+                    <MediaImage
                       src={selectedProposalForVerify.signed_proposal_doc}
                       alt="Physical Sign-off Document"
                       className="max-h-64 object-contain rounded-lg shadow-sm"
@@ -1189,14 +1440,14 @@ const AdvisorDashboard = () => {
                     />
                     <div style={{ display: 'none' }} className="p-6 text-center text-xs text-slate-500">
                       Document is hosted externally or is a PDF. <br/>
-                      <a
+                      <MediaLink
                         href={selectedProposalForVerify.signed_proposal_doc}
                         target="_blank"
                         rel="noreferrer"
                         className="text-indigo-600 underline font-bold mt-2 inline-block"
                       >
                         Click to view external scanned document file
-                      </a>
+                      </MediaLink>
                     </div>
                   </div>
                 </div>
@@ -1420,7 +1671,7 @@ const AdvisorDashboard = () => {
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
                   />
                   {(society?.payment_qr || society?.payment_qr_url) && (
-                    <img src={society.payment_qr || society.payment_qr_url} alt="Saved QR" className="w-10 h-10 rounded border bg-white p-0.5 object-contain shrink-0" />
+                    <MediaImage src={getMediaUrl(society.payment_qr || society.payment_qr_url)} alt="Saved QR" className="w-10 h-10 rounded border bg-white p-0.5 object-contain shrink-0" />
                   )}
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">Students will scan this via banking/wallet apps to pay ticket fees.</p>
@@ -1487,7 +1738,7 @@ const AdvisorDashboard = () => {
               {(signaturePreview || (typeof signatureImage === 'string' && signatureImage)) && (
                 <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-center">
                   <span className="text-[10px] text-slate-400 font-bold block mb-1">Preview:</span>
-                  <img src={signaturePreview || signatureImage} alt="Signature specimen" className="max-h-20 mx-auto object-contain" />
+                  <MediaImage src={signaturePreview || signatureImage} alt="Signature specimen" className="max-h-20 mx-auto object-contain" />
                 </div>
               )}
 
@@ -1587,7 +1838,7 @@ const AdvisorDashboard = () => {
                 <div className="space-y-1">
                   <div className="h-9 flex items-end">
                     {signatures[0]?.signature_image ? (
-                      <img src={signatures[0].signature_image} alt="Advisor signature" className="h-8 max-w-[120px] object-contain" />
+                      <MediaImage src={signatures[0].signature_image} alt="Advisor signature" className="h-8 max-w-[120px] object-contain" />
                     ) : (
                       <div className="font-serif italic text-xs text-slate-900 font-bold">
                         {user?.full_name || user?.username || 'Faculty Advisor'}
@@ -1663,7 +1914,7 @@ const AdvisorDashboard = () => {
               )}
               {selectedReceiptForPreview.receipt_file && (
                 <div className="pt-2 text-center">
-                  <img
+                  <MediaImage
                     src={getMediaUrl(selectedReceiptForPreview.receipt_file)}
                     alt="Receipt slip"
                     className="max-h-72 object-contain mx-auto rounded-xl border border-slate-200"
@@ -1674,14 +1925,14 @@ const AdvisorDashboard = () => {
                   />
                   <div style={{ display: 'none' }} className="text-xs text-slate-500 p-4">
                     Receipt is hosted externally or in non-image format.<br/>
-                    <a
+                    <MediaLink
                       href={getMediaUrl(selectedReceiptForPreview.receipt_file)}
                       target="_blank"
                       rel="noreferrer"
                       className="text-indigo-600 underline font-bold mt-2 inline-block"
                     >
                       Open Full Document Link <ExternalLink size={12} className="inline" />
-                    </a>
+                    </MediaLink>
                   </div>
                 </div>
               )}
@@ -1708,6 +1959,113 @@ const AdvisorDashboard = () => {
                 className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/30 transition cursor-pointer"
               >
                 Verify & Issue Ticket
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADVISOR PROFILE EDIT MODAL */}
+      <ExecutiveProfileModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        onProfileUpdated={() => {
+          showToast("Faculty Advisor profile and photo updated successfully!");
+        }}
+      />
+
+      {/* Delete Event Confirmation Modal */}
+      {deleteEventTarget && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-600">
+                <Trash2 size={24} />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900">Delete Event</h3>
+                <p className="text-xs text-slate-500">Permanent removal of event</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-600 mb-6">
+              Are you sure you want to permanently delete <strong className="text-slate-900 font-bold">"{deleteEventTarget.title}"</strong>? 
+              This will release university date locks and remove all associated attendee passes. This action cannot be undone.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingEvent}
+                onClick={() => setDeleteEventTarget(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingEvent}
+                onClick={handleDeleteEvent}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingEvent ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={14} />
+                    Yes, Delete Event
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Proposal Confirmation Modal */}
+      {deleteProposalTarget && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-600">
+                <Trash2 size={24} />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900">Delete Event Proposal</h3>
+                <p className="text-xs text-slate-500">{deleteProposalTarget.proposal_no}</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-600 mb-6">
+              Are you sure you want to delete proposal <strong className="text-slate-900 font-bold">"{deleteProposalTarget.event_title || deleteProposalTarget.title}"</strong>? 
+              This will release any provisional date reservations on the campus calendar.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingProposal}
+                onClick={() => setDeleteProposalTarget(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingProposal}
+                onClick={handleDeleteProposal}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingProposal ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={14} />
+                    Yes, Delete Proposal
+                  </>
+                )}
               </button>
             </div>
           </div>

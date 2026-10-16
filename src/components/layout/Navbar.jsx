@@ -6,9 +6,12 @@ import {
   GraduationCap, Award, Users, CheckCircle2, ChevronDown 
 } from 'lucide-react';
 import api from '../../utils/api';
+import { MediaImage } from '../common/AuthenticatedMedia';
+import { getMediaUrl } from '../../utils/media';
+import { PWAInstallButton } from '../common/PWAInstallBanner';
 
 const Navbar = () => {
-  const { user, logout } = useContext(AuthContext);
+  const { user, logout, isAuthLoading } = useContext(AuthContext);
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -79,34 +82,26 @@ const Navbar = () => {
               </div>
             </Link>
 
-            {user ? (
-              <div className="hidden lg:flex lg:ml-8 space-x-1">
-                {navLinks.map(link => (
-                  <Link
-                    key={link.to}
-                    to={link.to}
-                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition ${
-                      isActive(link.to)
-                        ? 'text-indigo-600 bg-indigo-50 font-black'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/60'
-                    }`}
-                  >
-                    {link.label}
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <div className="hidden md:flex items-center ml-6">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                  <Shield size={12} />
-                  Private University Network
-                </span>
-              </div>
-            )}
+            <div className="hidden lg:flex lg:ml-8 space-x-1">
+              {navLinks.map(link => (
+                <Link
+                  key={link.to}
+                  to={link.to}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+                    isActive(link.to)
+                      ? 'text-indigo-600 bg-indigo-50 font-black'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/60'
+                  }`}
+                >
+                  {link.label}
+                </Link>
+              ))}
+            </div>
           </div>
           
           {/* USER ACTIONS & ROLE PORTAL BUTTON */}
-          <div className="hidden sm:flex sm:items-center sm:space-x-4">
+          <div className="hidden sm:flex sm:items-center sm:space-x-3">
+            <PWAInstallButton className="hidden md:flex" />
             {user ? (
               <>
                 {/* ONLY Students see this */}
@@ -193,6 +188,19 @@ const Navbar = () => {
 
                 {/* USER PROFILE INFO PILL */}
                 <div className="flex items-center pl-2 border-l border-slate-200">
+                  {user.avatar_url || user.profile_photo_url ? (
+                    <div className="w-8 h-8 rounded-full overflow-hidden border border-indigo-200 mr-2.5 shrink-0 shadow-xs">
+                      <MediaImage
+                        src={getMediaUrl(user.avatar_url || user.profile_photo_url)}
+                        alt={user.first_name || user.username}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs mr-2.5 shrink-0">
+                      {(user.first_name || user.username || 'U').charAt(0).toUpperCase()}
+                    </div>
+                  )}
                   <div className="text-right mr-3">
                     <span className="block text-slate-900 font-bold text-xs leading-tight">
                       {user.first_name || user.username}
@@ -210,6 +218,11 @@ const Navbar = () => {
                   </button>
                 </div>
               </>
+            ) : isAuthLoading ? (
+              <div className="flex items-center space-x-2 pl-2">
+                <div className="h-8 w-16 bg-slate-200/80 animate-pulse rounded-xl" />
+                <div className="h-8 w-20 bg-slate-200/80 animate-pulse rounded-xl" />
+              </div>
             ) : (
               <div className="flex items-center space-x-3">
                 <Link to="/login" className="text-slate-700 hover:text-slate-900 px-4 py-2 text-xs font-bold transition">
@@ -222,8 +235,8 @@ const Navbar = () => {
             )}
           </div>
 
-          {/* MOBILE MENU TOGGLE */}
-          <div className="flex items-center sm:hidden">
+          {/* MOBILE & TABLET MENU TOGGLE */}
+          <div className="flex items-center lg:hidden">
             <button
               onClick={() => setIsOpen(!isOpen)}
               className="p-2 rounded-xl text-slate-500 hover:bg-slate-100"
@@ -234,83 +247,88 @@ const Navbar = () => {
         </div>
       </div>
 
-      {/* MOBILE DROPDOWN DRAWER */}
+      {/* MOBILE & TABLET DROPDOWN DRAWER */}
       {isOpen && (
-        <div className="sm:hidden bg-white border-b border-slate-200 px-4 pt-3 pb-6 space-y-2">
+        <div className="lg:hidden bg-white border-b border-slate-200 px-4 pt-3 pb-6 space-y-2">
+          {navLinks.map(link => (
+            <Link
+              key={link.to}
+              to={link.to}
+              onClick={() => setIsOpen(false)}
+              className={`block px-3 py-2 text-sm font-bold rounded-xl transition ${
+                isActive(link.to)
+                  ? 'text-indigo-600 bg-indigo-50 font-black'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              {link.label}
+            </Link>
+          ))}
+
+          <div className="pt-2">
+            <PWAInstallButton className="w-full justify-center py-2.5" />
+          </div>
+
           {user ? (
-            <>
-              {navLinks.map(link => (
+            <div className="pt-4 border-t border-slate-100 space-y-2">
+              {userRole === 'STUDENT' && (
                 <Link
-                  key={link.to}
-                  to={link.to}
+                  to="/student-dashboard"
                   onClick={() => setIsOpen(false)}
-                  className="block px-3 py-2 text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-100"
+                  className="block w-full text-center bg-blue-100 text-blue-700 py-2.5 rounded-xl text-xs font-bold"
                 >
-                  {link.label}
+                  My Profile
                 </Link>
-              ))}
-              <div className="pt-4 border-t border-slate-100 space-y-2">
-                {userRole === 'STUDENT' && (
-                  <Link
-                    to="/student-dashboard"
-                    onClick={() => setIsOpen(false)}
-                    className="block w-full text-center bg-blue-100 text-blue-700 py-2.5 rounded-xl text-xs font-bold"
-                  >
-                    My Profile
-                  </Link>
-                )}
-                {userRole === 'PRESIDENT' && (
-                  <Link
-                    to="/president-dashboard"
-                    onClick={() => setIsOpen(false)}
-                    className="block w-full text-center bg-purple-600 text-white py-2.5 rounded-xl text-xs font-bold shadow-md shadow-purple-600/20"
-                  >
-                    President Portal
-                  </Link>
-                )}
-                {userRole === 'FACULTY' && (
-                  <Link
-                    to="/advisor-dashboard"
-                    onClick={() => setIsOpen(false)}
-                    className="block w-full text-center bg-indigo-600 text-white py-2.5 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/20"
-                  >
-                    Faculty Console
-                  </Link>
-                )}
-                {userRole === 'ADMIN' && (
-                  <Link
-                    to="/admin-dashboard"
-                    onClick={() => setIsOpen(false)}
-                    className="block w-full text-center bg-blue-600 text-white py-2.5 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20"
-                  >
-                    Admin Console
-                  </Link>
-                )}
-                <button
-                  onClick={() => { logout(); setIsOpen(false); }}
-                  className="block w-full text-center bg-slate-100 text-red-600 py-2 rounded-xl text-xs font-bold cursor-pointer"
+              )}
+              {userRole === 'PRESIDENT' && (
+                <Link
+                  to="/president-dashboard"
+                  onClick={() => setIsOpen(false)}
+                  className="block w-full text-center bg-purple-600 text-white py-2.5 rounded-xl text-xs font-bold shadow-md shadow-purple-600/20"
                 >
-                  Sign Out
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="py-2 space-y-3">
-              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-2xl text-xs text-indigo-900">
-                <p className="font-bold flex items-center gap-1.5 mb-1">
-                  <Shield size={14} className="text-indigo-600" />
-                  Campus-Only Private Access
-                </p>
-                <p className="text-[11px] text-slate-600">
-                  Please sign in with your university credentials to explore departmental societies, events, and rosters.
-                </p>
-              </div>
+                  President Portal
+                </Link>
+              )}
+              {userRole === 'FACULTY' && (
+                <Link
+                  to="/advisor-dashboard"
+                  onClick={() => setIsOpen(false)}
+                  className="block w-full text-center bg-indigo-600 text-white py-2.5 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/20"
+                >
+                  Faculty Console
+                </Link>
+              )}
+              {userRole === 'ADMIN' && (
+                <Link
+                  to="/admin-dashboard"
+                  onClick={() => setIsOpen(false)}
+                  className="block w-full text-center bg-blue-600 text-white py-2.5 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20"
+                >
+                  Admin Console
+                </Link>
+              )}
+              <button
+                onClick={() => { logout(); setIsOpen(false); }}
+                className="block w-full text-center bg-slate-100 text-red-600 py-2 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Sign Out
+              </button>
+            </div>
+          ) : isAuthLoading ? (
+            <div className="pt-4 border-t border-slate-100 space-y-2">
               <div className="flex gap-2">
-                <Link to="/login" onClick={() => setIsOpen(false)} className="flex-1 text-center py-2.5 bg-slate-100 text-slate-800 font-bold text-xs rounded-xl">
+                <div className="flex-1 h-9 bg-slate-200/80 animate-pulse rounded-xl" />
+                <div className="flex-1 h-9 bg-slate-200/80 animate-pulse rounded-xl" />
+              </div>
+            </div>
+          ) : (
+            <div className="pt-4 border-t border-slate-100 space-y-2">
+              <div className="flex gap-2">
+                <Link to="/login" onClick={() => setIsOpen(false)} className="flex-1 text-center py-2.5 bg-slate-100 text-slate-800 font-bold text-xs rounded-xl hover:bg-slate-200 transition">
                   Sign In
                 </Link>
-                <Link to="/register" onClick={() => setIsOpen(false)} className="flex-1 text-center py-2.5 bg-indigo-600 text-white font-bold text-xs rounded-xl shadow-sm shadow-indigo-600/20">
-                  Student Register
+                <Link to="/register" onClick={() => setIsOpen(false)} className="flex-1 text-center py-2.5 bg-indigo-600 text-white font-bold text-xs rounded-xl shadow-sm shadow-indigo-600/20 hover:bg-indigo-700 transition">
+                  Register
                 </Link>
               </div>
             </div>

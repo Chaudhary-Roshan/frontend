@@ -1,9 +1,11 @@
+import { clickMediaDownload, MediaImage } from '../components/common/AuthenticatedMedia';
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { 
   Image as ImageIcon, Folder, FolderOpen, Lock, Globe, Eye, 
   UploadCloud, X, Calendar, Tag, Download, CheckCircle2, 
-  ArrowLeft, Sparkles, Filter, ChevronRight, Layers, ExternalLink
+  ArrowLeft, Sparkles, Filter, ChevronRight, Layers, ExternalLink,
+  Trash2
 } from 'lucide-react';
 import api from '../utils/api';
 import ImageUploader from '../components/common/ImageUploader';
@@ -33,6 +35,7 @@ const Galleries = () => {
   const [isPublicToggle, setIsPublicToggle] = useState(true);
   const [uploadedImages, setUploadedImages] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [toastMsg, setToastMsg] = useState(null);
 
@@ -107,7 +110,100 @@ const Galleries = () => {
     }
   };
 
-  const handleDownloadSingle = (e, imageUrl, filename = 'campus-event-photo.jpg') => {
+  // Check if current logged in user has administrative rights over this gallery folder
+  const canManageFolder = (folder) => {
+    if (!user) return false;
+    if (user.role === 'admin' || user.is_superuser || user.is_staff) return true;
+    if (user.role !== 'president' && user.role !== 'faculty') return false;
+
+    const folderSocId = Number(folder?.society_id || folder?.society);
+    if (!folderSocId) return false;
+
+    const userSocId = Number(user.society?.id || user.society_id || user.society);
+    if (userSocId && userSocId === folderSocId) return true;
+
+    if (user.role === 'president') {
+      if (Array.isArray(user.presided_society_ids) && user.presided_society_ids.map(Number).includes(folderSocId)) return true;
+      if (user.society_name && folder.society_name && user.society_name.trim().toLowerCase() === folder.society_name.trim().toLowerCase()) return true;
+    }
+    if (user.role === 'faculty') {
+      if (Array.isArray(user.advised_society_ids) && user.advised_society_ids.map(Number).includes(folderSocId)) return true;
+      if (user.society_name && folder.society_name && user.society_name.trim().toLowerCase() === folder.society_name.trim().toLowerCase()) return true;
+    }
+    return false;
+  };
+
+  // Delete an individual photograph
+  const handleDeletePhoto = async (e, photo) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    if (!photo || !photo.id) {
+      alert("Cannot delete photo: missing photo record ID.");
+      return;
+    }
+    const confirmed = window.confirm(`Are you sure you want to permanently delete this photograph ("${photo.title || 'Event photo'}")?`);
+    if (!confirmed) return;
+
+    try {
+      setIsDeleting(true);
+      await api.delete(`gallery/${photo.id}/`);
+      showToast("Photograph deleted successfully.");
+
+      if (activeImage && activeImage.id === photo.id) {
+        setActiveImage(null);
+      }
+
+      if (selectedFolder) {
+        setSelectedFolder(prev => ({
+          ...prev,
+          images: (prev.images || []).filter(img => img.id !== photo.id),
+          photo_count: Math.max(0, (prev.images?.length || 1) - 1)
+        }));
+      }
+
+      await fetchGalleryData();
+    } catch (err) {
+      console.error("Failed to delete photograph", err);
+      alert(err.response?.data?.error || "Failed to delete photograph. Please verify permissions.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Delete an entire album folder and all photos inside it
+  const handleDeleteFolder = async (e, folder) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    if (!folder) return;
+
+    const count = folder.images?.length || folder.photo_count || 0;
+    const confirmed = window.confirm(
+      `DANGER: Are you sure you want to permanently delete the entire album folder "${folder.album_name}" along with all ${count} photograph(s) inside it?\n\nThis action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setIsDeleting(true);
+      await api.post('gallery/delete_folder/', {
+        folder_id: folder.folder_id,
+        event_id: folder.event_id,
+        album_name: folder.album_name,
+        society_id: folder.society_id
+      });
+      showToast(`Deleted album folder "${folder.album_name}" successfully.`);
+
+      if (selectedFolder && selectedFolder.folder_id === folder.folder_id) {
+        setSelectedFolder(null);
+      }
+
+      await fetchGalleryData();
+    } catch (err) {
+      console.error("Failed to delete folder", err);
+      alert(err.response?.data?.error || "Failed to delete folder. Please verify permissions.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDownloadSingle = async (e, imageUrl, filename = 'campus-event-photo.jpg') => {
     if (e && e.stopPropagation) e.stopPropagation();
     try {
       const link = document.createElement('a');
@@ -116,7 +212,7 @@ const Galleries = () => {
       link.target = '_blank';
       link.rel = 'noreferrer';
       document.body.appendChild(link);
-      link.click();
+      await clickMediaDownload(link);
       document.body.removeChild(link);
       showToast("Download started!");
     } catch (err) {
@@ -129,14 +225,14 @@ const Galleries = () => {
     if (!folder || !folder.images || folder.images.length === 0) return;
     showToast(`Downloading all ${folder.images.length} photos from "${folder.album_name}"...`);
     folder.images.forEach((img, idx) => {
-      setTimeout(() => {
+      setTimeout(async () => {
         const link = document.createElement('a');
         link.href = img.image_url;
         link.download = `${folder.event_title.replace(/\s+/g, '_')}_photo_${idx + 1}.jpg`;
         link.target = '_blank';
         link.rel = 'noreferrer';
         document.body.appendChild(link);
-        link.click();
+        await clickMediaDownload(link);
         document.body.removeChild(link);
       }, idx * 300);
     });
@@ -235,7 +331,7 @@ const Galleries = () => {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <button
                   onClick={() => handleDownloadAllFolderPhotos(selectedFolder)}
                   className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs font-bold flex items-center gap-2 shadow-md shadow-indigo-600/30 transition cursor-pointer"
@@ -255,6 +351,17 @@ const Galleries = () => {
                     className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-bold flex items-center gap-2 shadow-sm transition cursor-pointer"
                   >
                     <UploadCloud size={15} /> + Add More Photos
+                  </button>
+                )}
+
+                {canManageFolder(selectedFolder) && (
+                  <button
+                    onClick={(e) => handleDeleteFolder(e, selectedFolder)}
+                    disabled={isDeleting}
+                    className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl text-xs font-bold flex items-center gap-2 shadow-sm shadow-rose-600/30 transition cursor-pointer disabled:opacity-50"
+                    title="Permanently delete this entire event album folder and all photos inside it"
+                  >
+                    <Trash2 size={15} /> Delete Folder
                   </button>
                 )}
               </div>
@@ -321,17 +428,20 @@ const Galleries = () => {
                       key={item.id || idx}
                       onClick={() => {
                         setActiveImage({
+                          id: item.id,
                           src,
                           title: item.title || selectedFolder.event_title,
                           socName: selectedFolder.society_name,
                           evTitle: selectedFolder.event_title,
-                          albumName: selectedFolder.album_name
+                          albumName: selectedFolder.album_name,
+                          society_id: selectedFolder.society_id,
+                          rawPhoto: item
                         });
                         setActiveImageIdx(idx);
                       }}
                       className="group relative h-64 bg-slate-900 rounded-3xl overflow-hidden cursor-pointer shadow-sm hover:shadow-xl transition-all duration-300 border border-slate-200 flex flex-col justify-end"
                     >
-                      <img
+                      <MediaImage
                         src={src}
                         alt={item.title || "Event photo"}
                         className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition duration-500 opacity-90 group-hover:opacity-100"
@@ -346,17 +456,29 @@ const Galleries = () => {
                           </span>
                         </div>
 
-                        <div className="flex items-center justify-between pt-1 border-t border-white/10">
-                          <span className="text-white text-xs font-bold truncate max-w-[150px]">
+                        <div className="flex items-center justify-between pt-1 border-t border-white/10 gap-2">
+                          <span className="text-white text-xs font-bold truncate max-w-[120px]">
                             {item.title || selectedFolder.event_title}
                           </span>
-                          <button
-                            onClick={(e) => handleDownloadSingle(e, src, `${selectedFolder.event_title.replace(/\s+/g, '_')}_photo_${idx + 1}.jpg`)}
-                            className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-900 rounded-xl text-[10px] font-bold flex items-center gap-1 shadow transition cursor-pointer"
-                            title="Download high-resolution image"
-                          >
-                            <Download size={11} className="text-indigo-600" /> Save
-                          </button>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              onClick={(e) => handleDownloadSingle(e, src, `${selectedFolder.event_title.replace(/\s+/g, '_')}_photo_${idx + 1}.jpg`)}
+                              className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-900 rounded-xl text-[10px] font-bold flex items-center gap-1 shadow transition cursor-pointer"
+                              title="Download high-resolution image"
+                            >
+                              <Download size={11} className="text-indigo-600" /> Save
+                            </button>
+                            {canManageFolder(selectedFolder) && (
+                              <button
+                                onClick={(e) => handleDeletePhoto(e, item)}
+                                disabled={isDeleting}
+                                className="px-2.5 py-1 bg-rose-600/90 hover:bg-rose-700 text-white rounded-xl text-[10px] font-bold flex items-center gap-1 shadow transition cursor-pointer disabled:opacity-50"
+                                title="Delete this photograph"
+                              >
+                                <Trash2 size={11} /> Delete
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -474,7 +596,7 @@ const Galleries = () => {
                     >
                       {/* Cover Photo with Glassy Accents */}
                       <div className="relative h-48 overflow-hidden bg-slate-900/40">
-                        <img
+                        <MediaImage
                           src={coverImg}
                           alt={album.event_title}
                           className="w-full h-full object-cover group-hover:scale-105 transition duration-500 opacity-90 group-hover:opacity-100"
@@ -520,9 +642,21 @@ const Galleries = () => {
                           <span className="text-[11px] font-bold text-slate-400">
                             {album.event_date ? new Date(album.event_date).toLocaleDateString() : 'Active Folder'}
                           </span>
-                          <span className="text-xs font-bold text-indigo-600 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
-                            Open Folder <ChevronRight size={14} />
-                          </span>
+                          <div className="flex items-center gap-2">
+                            {canManageFolder(album) && (
+                              <button
+                                onClick={(e) => handleDeleteFolder(e, album)}
+                                disabled={isDeleting}
+                                className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold transition cursor-pointer border border-rose-200 disabled:opacity-50"
+                                title="Permanently delete this entire album folder"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                            <span className="text-xs font-bold text-indigo-600 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                              Open Folder <ChevronRight size={14} />
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -563,6 +697,16 @@ const Galleries = () => {
                 >
                   <Download size={14} /> Download Photo
                 </button>
+                {canManageFolder(selectedFolder || { society_id: activeImage.society_id }) && activeImage.id && (
+                  <button
+                    onClick={(e) => handleDeletePhoto(e, activeImage)}
+                    disabled={isDeleting}
+                    className="bg-rose-600 hover:bg-rose-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-rose-600/30 transition cursor-pointer disabled:opacity-50"
+                    title="Delete this photograph"
+                  >
+                    <Trash2 size={14} /> Delete Photo
+                  </button>
+                )}
                 <button
                   onClick={() => setActiveImage(null)}
                   className="bg-slate-800 hover:bg-slate-700 text-white p-2 rounded-xl transition cursor-pointer"
@@ -574,7 +718,7 @@ const Galleries = () => {
 
             {/* Photo Viewer */}
             <div className="flex-1 overflow-auto flex items-center justify-center p-4 bg-black/80">
-              <img src={activeImage.src} alt="Full resolution" className="max-h-[75vh] w-auto object-contain rounded-2xl" />
+              <MediaImage src={activeImage.src} alt="Full resolution" className="max-h-[75vh] w-auto object-contain rounded-2xl" />
             </div>
           </div>
         </div>

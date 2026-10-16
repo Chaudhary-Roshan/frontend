@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import { MediaImage } from '../components/common/AuthenticatedMedia';
+import React, { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../utils/api';
+import { getMediaUrl, handleImageError } from '../utils/media';
 import { 
   Users, ArrowRight, Search, Filter, ShieldCheck, Sparkles, 
   Award, Calendar, UserCheck, CheckCircle2, ChevronRight,
@@ -24,32 +26,93 @@ const LinkedinIcon = () => (
 );
 
 const Societies = () => {
-  const [societies, setSocieties] = useState([]);
-  const [recruitments, setRecruitments] = useState([]);
-  const [events, setEvents] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [societies, setSocieties] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('dsms_cached_societies');
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [recruitments, setRecruitments] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('dsms_cached_recruitments');
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [events, setEvents] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('dsms_cached_events');
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [loading, setLoading] = useState(() => {
+    try {
+      return !sessionStorage.getItem('dsms_cached_societies');
+    } catch (e) {
+      return true;
+    }
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
 
+  const isFetchingSocietiesRef = useRef(false);
+
   useEffect(() => {
     fetchData();
+
+    const handleSync = () => {
+      fetchData();
+    };
+
+    window.addEventListener('dsms:data_synced', handleSync);
+    return () => {
+      window.removeEventListener('dsms:data_synced', handleSync);
+    };
   }, []);
 
   const fetchData = async () => {
-    try {
-      const [socRes, recRes, evRes] = await Promise.allSettled([
-        api.get('societies/'),
-        api.get('recruitments/'),
-        api.get('events/')
-      ]);
-      if (socRes.status === 'fulfilled') setSocieties(socRes.value.data);
-      if (recRes.status === 'fulfilled') setRecruitments(recRes.value.data);
-      if (evRes.status === 'fulfilled') setEvents(evRes.value.data);
-    } catch (error) {
-      console.error('Failed to fetch societies', error);
-    } finally {
-      setLoading(false);
-    }
+    if (isFetchingSocietiesRef.current) return;
+    isFetchingSocietiesRef.current = true;
+    // 1. Fetch societies first and unblock UI immediately
+    api.get('societies/')
+      .then(res => {
+        setSocieties(res.data);
+        try {
+          sessionStorage.setItem('dsms_cached_societies', JSON.stringify(res.data));
+        } catch (e) {}
+        setLoading(false);
+      })
+      .catch(error => {
+        console.error('Failed to fetch societies', error);
+        setLoading(false);
+      });
+
+    // 2. Fetch auxiliary stats in parallel (non-blocking)
+    api.get('recruitments/')
+      .then(res => {
+        setRecruitments(res.data);
+        try {
+          sessionStorage.setItem('dsms_cached_recruitments', JSON.stringify(res.data));
+        } catch (e) {}
+      })
+      .catch(console.error);
+
+    api.get('events/')
+      .then(res => {
+        setEvents(res.data);
+        try {
+          sessionStorage.setItem('dsms_cached_events', JSON.stringify(res.data));
+        } catch (e) {}
+      })
+      .catch(console.error)
+      .finally(() => {
+        isFetchingSocietiesRef.current = false;
+      });
   };
 
   const categories = [
@@ -77,6 +140,12 @@ const Societies = () => {
       return soc.name.toLowerCase().includes('emergency') || soc.name.toLowerCase().includes('response') || soc.name.toLowerCase().includes('health');
     }
     return true;
+  }).sort((a, b) => {
+    const aCSSC = (a.name || '').toLowerCase().includes('cyber security student club');
+    const bCSSC = (b.name || '').toLowerCase().includes('cyber security student club');
+    if (aCSSC && !bCSSC) return -1;
+    if (!aCSSC && bCSSC) return 1;
+    return (a.id || 0) - (b.id || 0);
   });
 
   const getOpenRecruitment = (socId) => {
@@ -86,17 +155,6 @@ const Societies = () => {
   const getSocietyEventCount = (socId) => {
     return events.filter(e => e.society === socId).length;
   };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Loading Societies Directory...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="bg-slate-50 min-h-screen py-10 px-4 sm:px-6 lg:px-8 font-sans">
@@ -174,7 +232,26 @@ const Societies = () => {
         </div>
 
         {/* Societies Grid */}
-        {filteredSocieties.length === 0 ? (
+        {loading && societies.length === 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[1, 2, 3, 4, 5, 6].map(n => (
+              <div key={n} className="bg-white rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden animate-pulse">
+                <div className="h-44 sm:h-48 bg-slate-200"></div>
+                <div className="p-6 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-200"></div>
+                    <div className="space-y-2 flex-1">
+                      <div className="h-4 bg-slate-200 rounded w-3/4"></div>
+                      <div className="h-3 bg-slate-200 rounded w-1/2"></div>
+                    </div>
+                  </div>
+                  <div className="h-10 bg-slate-100 rounded-xl"></div>
+                  <div className="h-8 bg-slate-200 rounded-xl"></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : filteredSocieties.length === 0 ? (
           <div className="bg-white border border-slate-200 rounded-3xl p-12 text-center shadow-sm">
             <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
             <h3 className="text-base font-bold text-slate-700">No societies found matching your search</h3>
@@ -200,10 +277,11 @@ const Societies = () => {
                   {/* Card Header Wrapper */}
                   <div className="relative">
                     {/* Society Cover Photo / Banner (with overflow hidden for scale effect) */}
-                    <div className="h-44 sm:h-48 w-full overflow-hidden shrink-0 bg-slate-900">
+                    <div className="w-full aspect-[16/9] sm:aspect-[2/1] md:aspect-[16/9] overflow-hidden shrink-0 bg-slate-900">
                       {(society.cover_image || society.cover_photo) ? (
-                        <img
-                          src={society.cover_image || society.cover_photo}
+                        <MediaImage
+                          src={getMediaUrl(society.cover_image || society.cover_photo)}
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
                           alt={`${society.name} cover`}
                           className="w-full h-full object-cover object-center group-hover:scale-105 transition duration-500"
                         />
@@ -233,7 +311,12 @@ const Societies = () => {
                     {/* Logo overlay (outside overflow-hidden to prevent clipping) */}
                     <div className="absolute bottom-0 left-4 translate-y-1/2 w-14 h-14 rounded-2xl border-2 border-white shadow-lg overflow-hidden bg-white shrink-0 z-10">
                       {society.logo ? (
-                        <img src={society.logo} alt={society.name} className="w-full h-full object-contain p-0.5" />
+                        <MediaImage
+                          src={getMediaUrl(society.logo)}
+                          onError={handleImageError}
+                          alt={society.name}
+                          className="w-full h-full object-contain p-0.5"
+                        />
                       ) : (
                         <div className="w-full h-full bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center font-black text-lg">
                           {society.name.substring(0, 2).toUpperCase()}

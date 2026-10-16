@@ -6,6 +6,7 @@ import {
   Mail, RefreshCw, CheckCircle2, Eye, EyeOff, Loader2, ShieldCheck
 } from 'lucide-react';
 import api from '../utils/api';
+import AcademicCombobox from '../components/common/AcademicCombobox';
 
 
 
@@ -66,7 +67,6 @@ const InputField = ({ label, required, hint, error, children }) => (
 
 const Register = () => {
   const [rollNumber, setRollNumber] = useState('');
-  const [universityEmail, setUniversityEmail] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
@@ -94,7 +94,7 @@ const Register = () => {
   const [successMsg, setSuccessMsg] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { register, verifyOtp } = useContext(AuthContext);
+  const { register, verifyOtp, resendOtp } = useContext(AuthContext);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -124,12 +124,6 @@ const Register = () => {
   const handleRollNumberChange = (e) => {
     const val = e.target.value.toUpperCase();
     setRollNumber(val);
-    const oldGenerated = rollNumber ? `${rollNumber.toLowerCase()}@iub.edu.pk` : '';
-    const current = universityEmail.trim().toLowerCase();
-    if (!current || current === oldGenerated) {
-      const generated = val ? `${val.toLowerCase()}@iub.edu.pk` : '';
-      setUniversityEmail(generated);
-    }
     if (fieldErrors.roll_number) setFieldErrors(prev => ({ ...prev, roll_number: null }));
   };
 
@@ -152,6 +146,8 @@ const Register = () => {
       errs.email = 'A valid login email address is required.';
     if (!formData.first_name.trim()) errs.first_name = 'First name is required.';
     if (!formData.last_name.trim()) errs.last_name = 'Last name is required.';
+    if (!formData.department?.trim()) errs.department = 'Academic department is required.';
+    if (!formData.program?.trim()) errs.program = 'Degree program is required.';
     if (!formData.password) errs.password = 'Password is required.';
     else if (formData.password.length < 8) errs.password = 'Password must be at least 8 characters.';
     if (formData.password !== formData.confirmPassword) errs.confirmPassword = 'Passwords do not match.';
@@ -167,19 +163,17 @@ const Register = () => {
       return;
     }
 
-    const cleanUniEmail = universityEmail.trim().toLowerCase() ||
-      (rollNumber ? `${rollNumber.toLowerCase()}@iub.edu.pk` : '');
-
     setIsSubmitting(true);
     setFieldErrors({});
     try {
+      const cleanEmail = formData.email.trim().toLowerCase();
       const payload = {
-        email: formData.email.trim().toLowerCase(),
+        email: cleanEmail,
         password: formData.password,
         first_name: formData.first_name.trim(),
         last_name: formData.last_name.trim(),
         roll_number: rollNumber.trim().toUpperCase(),
-        university_email: cleanUniEmail,
+        university_email: cleanEmail,
         cnic: formData.cnic,
         department: formData.department,
         program: formData.program,
@@ -193,7 +187,9 @@ const Register = () => {
         setRegisteredEmail(res.email || formData.email);
         setStep('otp');
         setResendCooldown(60);
-        setSuccessMsg(res.message || 'OTP has been sent to your email. Please verify to activate your account.');
+        // Show masked email if available (from backend or GAS response)
+        const displayEmail = res.masked_email || res.email || formData.email;
+        setSuccessMsg(res.message || `OTP has been sent to ${displayEmail}. Please verify to activate your account.`);
       } else {
         navigate('/student-dashboard');
       }
@@ -235,7 +231,15 @@ const Register = () => {
       await verifyOtp(registeredEmail || formData.email, otpCode.trim());
       navigate('/student-dashboard');
     } catch (err) {
-      setError(err.response?.data?.error || 'Invalid or expired OTP. Please try again or request a new code.');
+      const data = err.response?.data;
+      // 208 = already verified — account exists, just redirect to login
+      if (err.response?.status === 208 || data?.already_verified) {
+        navigate('/login', {
+          state: { message: 'Your account is already verified. Please log in.' }
+        });
+        return;
+      }
+      setError(data?.error || 'Invalid or expired OTP. Please try again or request a new code.');
     } finally {
       setIsSubmitting(false);
     }
@@ -246,11 +250,31 @@ const Register = () => {
     setIsSubmitting(true);
     setError(null);
     try {
-      const res = await api.post('auth/resend-otp/', { email: registeredEmail || formData.email });
-      setSuccessMsg(res.data.message || 'A new OTP has been dispatched to your email.');
+      const email = registeredEmail || formData.email;
+      const name  = `${formData.first_name || ''} ${formData.last_name || ''}`.trim() || 'User';
+      const res = await resendOtp(email, name);
+
+      // 208 = already verified — redirect to login with a message
+      if (res?.already_verified) {
+        navigate('/login', {
+          state: { message: 'Your account is already verified. Please log in.' }
+        });
+        return;
+      }
+
+      const displayEmail = res.masked_email || email;
+      setSuccessMsg(res.message || `A new OTP has been dispatched to ${displayEmail}.`);
       setResendCooldown(60);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to resend OTP. Please wait a moment and try again.');
+      // Axios throws on non-2xx; also check for 208 in the error response
+      const data = err.response?.data;
+      if (err.response?.status === 208 || data?.already_verified) {
+        navigate('/login', {
+          state: { message: 'Your account is already verified. Please log in.' }
+        });
+        return;
+      }
+      setError(err.response?.data?.error || err.message || 'Failed to resend OTP. Please wait a moment and try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -325,39 +349,25 @@ const Register = () => {
           {step === 'form' ? (
             <form onSubmit={handleRegisterSubmit} noValidate autoComplete="on">
 
-              {/* Row: Roll Number + University Email */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <InputField label="Roll Number" required error={fieldErrors.roll_number}>
-                  <input
-                    type="text"
-                    name="roll_number"
-                    autoComplete="off"
-                    placeholder="S23BINCE1M04014"
-                    value={rollNumber}
-                    onChange={handleRollNumberChange}
-                    style={{ ...inputStyle, fontFamily: 'monospace', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px' }}
-                    onFocus={e => e.target.style.borderColor = '#6366f1'}
-                    onBlur={e => e.target.style.borderColor = fieldErrors.roll_number ? 'rgba(185,28,28,0.7)' : 'rgba(51,65,85,0.9)'}
-                  />
-                </InputField>
-                <InputField label="University Email" hint="Auto-filled from roll number">
-                  <input
-                    type="email"
-                    name="university_email"
-                    autoComplete="off"
-                    placeholder="s23bince1m04014@iub.edu.pk"
-                    value={universityEmail}
-                    onChange={(e) => setUniversityEmail(e.target.value)}
-                    style={{ ...inputStyle, fontFamily: 'monospace', fontSize: '12px' }}
-                    onFocus={e => e.target.style.borderColor = '#6366f1'}
-                    onBlur={e => e.target.style.borderColor = 'rgba(51,65,85,0.9)'}
-                  />
-                </InputField>
-              </div>
+              {/* Roll Number */}
+              <InputField label="Student Roll Number" required error={fieldErrors.roll_number}
+                hint="Your official university roll number (e.g. S23BINCE1M04014)">
+                <input
+                  type="text"
+                  name="roll_number"
+                  autoComplete="off"
+                  placeholder="e.g. S23BINCE1M04014"
+                  value={rollNumber}
+                  onChange={handleRollNumberChange}
+                  style={{ ...inputStyle, fontFamily: 'monospace', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px' }}
+                  onFocus={e => e.target.style.borderColor = '#6366f1'}
+                  onBlur={e => e.target.style.borderColor = fieldErrors.roll_number ? 'rgba(185,28,28,0.7)' : 'rgba(51,65,85,0.9)'}
+                />
+              </InputField>
 
-              {/* Login Email */}
-              <InputField label="Login Email (Receives OTP)" required error={fieldErrors.email}
-                hint="Use a personal email (Gmail, etc.). Your OTP verification code will be sent here.">
+              {/* Single Email Address */}
+              <InputField label="Email Address (Receives OTP)" required error={fieldErrors.email}
+                hint="Single email used for account registration, sign in, and receiving your OTP verification code.">
                 <input
                   type="email"
                   name="email"
@@ -435,37 +445,21 @@ const Register = () => {
                 </InputField>
               </div>
 
-              {/* Department */}
-              <InputField label="Department" hint="e.g. Department of Information and Communication Engineering">
-                <input
-                  type="text"
-                  name="department"
-                  autoComplete="organization"
-                  placeholder="Enter your department"
-                  value={formData.department}
-                  onChange={handleChange}
-                  style={inputStyle}
-                  onFocus={e => e.target.style.borderColor = '#6366f1'}
-                  onBlur={e => e.target.style.borderColor = 'rgba(51,65,85,0.9)'}
+              {/* Searchable Academic Department & Degree Program Combobox */}
+              <div style={{ marginBottom: '14px' }}>
+                <AcademicCombobox
+                  selectedDepartment={formData.department}
+                  onDepartmentChange={(dept) => setFormData(prev => ({ ...prev, department: dept }))}
+                  selectedProgram={formData.program}
+                  onProgramChange={(prog) => setFormData(prev => ({ ...prev, program: prog }))}
+                  departmentError={fieldErrors.department}
+                  programError={fieldErrors.program}
                 />
-              </InputField>
+              </div>
 
-              {/* Program + Batch */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <InputField label="Degree Program">
-                  <input
-                    type="text"
-                    name="program"
-                    autoComplete="off"
-                    placeholder="e.g. BS Cyber Security and Digital Forensics"
-                    value={formData.program}
-                    onChange={handleChange}
-                    style={inputStyle}
-                    onFocus={e => e.target.style.borderColor = '#6366f1'}
-                    onBlur={e => e.target.style.borderColor = 'rgba(51,65,85,0.9)'}
-                  />
-                </InputField>
-                <InputField label="Batch">
+              {/* Batch & Semester */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+                <InputField label="Batch" hint="e.g. 2023-2027">
                   <input
                     type="text"
                     name="batch"
@@ -478,21 +472,20 @@ const Register = () => {
                     onBlur={e => e.target.style.borderColor = 'rgba(51,65,85,0.9)'}
                   />
                 </InputField>
-              </div>
 
-              {/* Semester */}
-              <InputField label="Current Semester">
-                <select
-                  name="semester"
-                  value={formData.semester}
-                  onChange={handleChange}
-                  style={{ ...inputStyle, cursor: 'pointer', appearance: 'none', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M6 8L1 3h10z'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 14px center', paddingRight: '36px' }}
-                  onFocus={e => e.target.style.borderColor = '#6366f1'}
-                  onBlur={e => e.target.style.borderColor = 'rgba(51,65,85,0.9)'}
-                >
-                  {SEMESTERS.map(s => <option key={s} value={s} style={{ background: '#0f172a' }}>{s}</option>)}
-                </select>
-              </InputField>
+                <InputField label="Current Semester">
+                  <select
+                    name="semester"
+                    value={formData.semester}
+                    onChange={handleChange}
+                    style={{ ...inputStyle, cursor: 'pointer', appearance: 'none', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M6 8L1 3h10z'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 14px center', paddingRight: '36px' }}
+                    onFocus={e => e.target.style.borderColor = '#6366f1'}
+                    onBlur={e => e.target.style.borderColor = 'rgba(51,65,85,0.9)'}
+                  >
+                    {SEMESTERS.map(s => <option key={s} value={s} style={{ background: '#0f172a' }}>{s}</option>)}
+                  </select>
+                </InputField>
+              </div>
 
               {/* Password */}
               <InputField label="Password" required error={fieldErrors.password}>

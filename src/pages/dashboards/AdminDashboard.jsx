@@ -1,4 +1,5 @@
-import React, { useContext, useEffect, useState } from 'react';
+import { MediaImage, MediaLink } from '../../components/common/AuthenticatedMedia';
+import React, { useContext, useEffect, useState, useRef } from 'react';
 import { AuthContext } from '../../context/AuthContext';
 import { 
   ShieldCheck, Map, CheckSquare, Users, Building, 
@@ -15,10 +16,11 @@ import api from '../../utils/api';
 import { uploadFileToServer } from '../../utils/fileUpload';
 import ImageUploader from '../../components/common/ImageUploader';
 import EventProposalDocumentModal from '../../components/modals/EventProposalDocumentModal';
+import { generateOfficialProposalPDF } from '../../utils/officialPdfGenerator';
 import PaymentVerificationDesk from '../../components/ticketing/PaymentVerificationDesk';
 import ManualTicketingHub from '../../components/ticketing/ManualTicketingHub';
 import MembershipConfiguration from '../../components/membership/MembershipConfiguration';
-import { getMediaUrl } from '../../utils/media';
+import { getMediaUrl, handleImageError } from '../../utils/media';
 
 const AdminDashboard = () => {
   const { user } = useContext(AuthContext);
@@ -120,6 +122,7 @@ const AdminDashboard = () => {
   const [roleTransferTarget, setRoleTransferTarget] = useState(null);
   const [newRoleVal, setNewRoleVal] = useState('student');
   const [newSocietyVal, setNewSocietyVal] = useState('');
+  const [newFacultySocieties, setNewFacultySocieties] = useState([]);
   const [roleTransferSubmitting, setRoleTransferSubmitting] = useState(false);
 
   // 3. Account Audit History State
@@ -225,19 +228,32 @@ const AdminDashboard = () => {
     }
   };
 
+  const isFetchingAllRef = useRef(false);
+
   useEffect(() => {
-    if (user?.role === 'admin') {
-      fetchAllData();
-    }
-  }, [user]);
+    fetchAllData();
+
+    const handleSync = (e) => {
+      if (e?.detail?.url?.includes('upload')) return;
+      fetchAllData(true);
+    };
+    window.addEventListener('dsms:data_synced', handleSync);
+    return () => {
+      window.removeEventListener('dsms:data_synced', handleSync);
+    };
+  }, []);
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 4500);
   };
 
-  const fetchAllData = async () => {
-    setLoading(true);
+  const fetchAllData = async (isBackground = false) => {
+    if (isFetchingAllRef.current) return;
+    isFetchingAllRef.current = true;
+    if (!isBackground) {
+      setLoading(true);
+    }
     try {
       const [socRes, usersRes, evRes, regRes, venRes, newsRes, compRes, propRes, healthRes, backupRes, settRes, galRes] = await Promise.allSettled([
         api.get('societies/'),
@@ -271,11 +287,29 @@ const AdminDashboard = () => {
           setSystemSettingsForm(found.value);
         }
       }
+
+      // Log any endpoint warnings to console for rapid diagnostic visibility
+      [
+        { name: 'societies', res: socRes },
+        { name: 'users', res: usersRes },
+        { name: 'events', res: evRes },
+        { name: 'registrations', res: regRes },
+        { name: 'proposals', res: propRes }
+      ].forEach(ep => {
+        if (ep.res.status === 'rejected') {
+          console.warn(`[Admin Live Sync] Endpoint ${ep.name} could not be retrieved:`, ep.res.reason);
+        }
+      });
     } catch (err) {
       console.error(err);
-      showToast('Error syncing administrative records.', 'error');
+      if (!isBackground) {
+        showToast('Error syncing administrative records.', 'error');
+      }
     } finally {
-      setLoading(false);
+      if (!isBackground) {
+        setLoading(false);
+      }
+      isFetchingAllRef.current = false;
     }
   };
 
@@ -409,8 +443,15 @@ const AdminDashboard = () => {
 
     // 1. Optimistic UI update - vanishes instantly from the screen
     if (type === 'user') setUsersList(prev => prev.filter(u => u.id !== id));
-    if (type === 'society') setSocieties(prev => prev.filter(s => s.id !== id));
-    if (type === 'event') setEvents(prev => prev.filter(e => e.id !== id));
+    if (type === 'society') {
+      setSocieties(prev => prev.filter(s => s.id !== id));
+      setEvents(prev => prev.filter(e => e.society !== id && e.society_id !== id));
+      setUsersList(prev => prev.map(u => (u.society === id || u.society_id === id) ? { ...u, society: null, society_id: null, society_name: null } : u));
+    }
+    if (type === 'event') {
+      setEvents(prev => prev.filter(e => e.id !== id));
+      setPaidRegistrations(prev => prev.filter(r => r.event !== id && r.event_id !== id));
+    }
     if (type === 'venue') setVenues(prev => prev.filter(v => v.id !== id));
     if (type === 'news') setNewsList(prev => prev.filter(n => n.id !== id));
     if (type === 'complaint') setComplaintsList(prev => prev.filter(c => c.id !== id));
@@ -598,12 +639,14 @@ const AdminDashboard = () => {
         showToast(`Account details for @${payload.username} updated.`);
         setShowUserModal(false);
         setEditingUser(null);
+        fetchAllData(true);
       } else {
         const generatedPassword = userForm.password.trim() || `Campus@${Math.floor(1000 + Math.random() * 9000)}`;
         payload.password = generatedPassword;
 
         const res = await api.post('users/', payload);
-        setUsersList(prev => [res.data, ...prev]);
+        const newUser = res.data;
+        setUsersList(prev => [newUser, ...prev.filter(u => u.id !== newUser.id)]);
         setIssuedCreds({
           username: payload.username,
           password: generatedPassword,
@@ -613,6 +656,11 @@ const AdminDashboard = () => {
         });
         showToast(`Official ${payload.role.toUpperCase()} account provisioned for @${payload.username}.`);
         setShowUserModal(false);
+        setActiveTab('users');
+        setCredentialsSubTab(payload.role === 'student' ? 'students' : 'executive');
+        setRoleFilter('all');
+        setSearchQuery('');
+        fetchAllData(true);
       }
 
       setUserForm({
@@ -675,6 +723,10 @@ const AdminDashboard = () => {
     setRoleTransferTarget(u);
     setNewRoleVal(u.role || 'student');
     setNewSocietyVal(u.society ? String(u.society) : '');
+    const initialAdvised = (u.advised_society_ids && u.advised_society_ids.length > 0)
+      ? u.advised_society_ids
+      : (u.society ? [u.society] : []);
+    setNewFacultySocieties(initialAdvised.map(Number));
   };
 
   // Execute Role Change & Society Transfer
@@ -686,16 +738,32 @@ const AdminDashboard = () => {
       const roleChanged = newRoleVal !== roleTransferTarget.role;
       const targetSocId = newSocietyVal ? parseInt(newSocietyVal) : null;
       
-      if (roleChanged) {
-        await api.post(`users/${roleTransferTarget.id}/change_role/`, {
-          role: newRoleVal,
-          society_id: targetSocId,
-          clear_society: !newSocietyVal
-        });
+      if (newRoleVal === 'faculty') {
+        const payload = {
+          society_ids: newFacultySocieties,
+          society_id: newFacultySocieties[0] || null,
+          clear_society: newFacultySocieties.length === 0
+        };
+        if (roleChanged) {
+          await api.post(`users/${roleTransferTarget.id}/change_role/`, {
+            role: 'faculty',
+            ...payload
+          });
+        } else {
+          await api.post(`users/${roleTransferTarget.id}/transfer_society/`, payload);
+        }
       } else {
-        await api.post(`users/${roleTransferTarget.id}/transfer_society/`, {
-          society_id: targetSocId
-        });
+        if (roleChanged) {
+          await api.post(`users/${roleTransferTarget.id}/change_role/`, {
+            role: newRoleVal,
+            society_id: targetSocId,
+            clear_society: !newSocietyVal
+          });
+        } else {
+          await api.post(`users/${roleTransferTarget.id}/transfer_society/`, {
+            society_id: targetSocId
+          });
+        }
       }
 
       // Re-fetch users and societies to ensure all linkages are in full sync
@@ -922,7 +990,8 @@ const AdminDashboard = () => {
     }
   };
 
-  if (!user || user.role !== 'admin') {
+  const isSuperAdmin = Boolean(user && (user.role === 'admin' || user.is_superuser));
+  if (!isSuperAdmin) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-white font-sans">
         <div className="bg-slate-900 border border-rose-500/30 p-8 rounded-3xl max-w-md text-center shadow-2xl">
@@ -934,40 +1003,62 @@ const AdminDashboard = () => {
     );
   }
 
-  // Filtered lists
-  const advisorsList = usersList.filter(u => u.role === 'faculty');
-  const presidentsList = usersList.filter(u => u.role === 'president');
+  // Helper to recognize executive leadership accounts (both database role and assigned society leaders)
+  const isExecutiveUser = (u) => {
+    if (['president', 'faculty', 'admin'].includes(u.role)) return true;
+    if (societies.some(s => (s.president && (s.president === u.id || s.president?.id === u.id)) || (s.advisor && (s.advisor === u.id || s.advisor?.id === u.id)))) return true;
+    return false;
+  };
+
+  const getEffectiveUserRole = (u) => {
+    if (['president', 'faculty', 'admin'].includes(u.role)) return u.role;
+    if (societies.some(s => s.president && (s.president === u.id || s.president?.id === u.id))) return 'president';
+    if (societies.some(s => s.advisor && (s.advisor === u.id || s.advisor?.id === u.id))) return 'faculty';
+    return u.role || 'student';
+  };
+
+  const getEffectiveSocietyName = (u) => {
+    if (u.society_name) return u.society_name;
+    const soc = societies.find(s => (s.president && (s.president === u.id || s.president?.id === u.id)) || (s.advisor && (s.advisor === u.id || s.advisor?.id === u.id)) || s.id === u.society);
+    return soc ? soc.name : null;
+  };
+
+  // Filtered lists for dropdowns
+  const advisorsList = usersList.filter(u => u.role === 'faculty' || societies.some(s => s.advisor === u.id || s.advisor?.id === u.id));
+  const presidentsList = usersList.filter(u => u.role === 'president' || societies.some(s => s.president === u.id || s.president?.id === u.id));
 
   const baseUserFilter = (u) => {
     if (userStatusFilter === 'active' && !u.is_active) return false;
     if (userStatusFilter === 'disabled' && u.is_active) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
+    const socName = getEffectiveSocietyName(u);
     return (
       (u.username && u.username.toLowerCase().includes(q)) ||
       (u.first_name && u.first_name.toLowerCase().includes(q)) ||
       (u.last_name && u.last_name.toLowerCase().includes(q)) ||
       (u.email && u.email.toLowerCase().includes(q)) ||
       (u.roll_number && u.roll_number.toLowerCase().includes(q)) ||
-      (u.society_name && u.society_name.toLowerCase().includes(q))
+      (socName && socName.toLowerCase().includes(q))
     );
   };
 
   // Executive accounts: presidents, faculty advisors, admins
   const filteredExecutiveUsers = usersList.filter(u => {
-    if (!['president', 'faculty', 'admin'].includes(u.role)) return false;
-    if (roleFilter !== 'all' && !['all', 'president', 'faculty', 'admin'].includes(roleFilter)) return false;
-    if (roleFilter !== 'all' && u.role !== roleFilter) return false;
+    if (!isExecutiveUser(u)) return false;
+    const effRole = getEffectiveUserRole(u);
+    if (roleFilter !== 'all' && effRole !== roleFilter) return false;
     return baseUserFilter(u);
   });
 
   // Student accounts only
   const filteredStudentUsers = usersList.filter(u => {
+    if (isExecutiveUser(u)) return false;
     if (u.role !== 'student') return false;
     return baseUserFilter(u);
   });
 
-  // Legacy alias used in the rest of the file (now points to the active sub-tab's list)
+  // Active sub-tab list
   const filteredUsers = credentialsSubTab === 'executive' ? filteredExecutiveUsers : filteredStudentUsers;
 
   const filteredEvents = events.filter(e => {
@@ -1064,11 +1155,22 @@ const AdminDashboard = () => {
                   roll_number: '', father_name: '', program: '', department: '',
                   faculty_name: '', phone_number: ''
                 });
+                setActiveTab('users');
                 setShowUserModal(true);
               }}
               className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-2xl font-bold text-xs flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition hover:-translate-y-0.5 cursor-pointer"
             >
               <Users size={15} /> Issue Credentials
+            </button>
+            <button
+              onClick={() => {
+                showToast("Fetching latest live records from database...", "info");
+                fetchAllData(false);
+              }}
+              className="bg-slate-800 hover:bg-slate-700 text-rose-300 border border-rose-500/30 px-4 py-2.5 rounded-2xl font-bold text-xs flex items-center gap-2 transition cursor-pointer"
+              title="Force sync all live data from database"
+            >
+              <RefreshCw size={15} className={loading ? "animate-spin text-rose-400" : "text-rose-400"} /> Sync Live Data
             </button>
             <button
               onClick={() => setShowNewsModal(true)}
@@ -1230,7 +1332,12 @@ const AdminDashboard = () => {
                       {/* Cover Photo Backdrop if present */}
                       {soc.cover_image && (
                         <div className="absolute top-0 left-0 right-0 h-24 overflow-hidden -z-0 opacity-20 group-hover:opacity-30 transition">
-                          <img src={soc.cover_image} alt="" className="w-full h-full object-cover" />
+                          <MediaImage
+                            src={getMediaUrl(soc.cover_image)}
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                            alt=""
+                            className="w-full h-full object-cover"
+                          />
                           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-slate-900" />
                         </div>
                       )}
@@ -1240,7 +1347,12 @@ const AdminDashboard = () => {
                         <div className="flex items-start justify-between gap-3 mb-4">
                           <div className="flex items-center gap-3">
                             {soc.logo ? (
-                              <img src={soc.logo} alt="" className="w-12 h-12 rounded-2xl object-cover border border-slate-700 bg-slate-950 p-1 shadow-md" />
+                              <MediaImage
+                                src={getMediaUrl(soc.logo)}
+                                onError={handleImageError}
+                                alt=""
+                                className="w-12 h-12 rounded-2xl object-cover border border-slate-700 bg-slate-950 p-1 shadow-md"
+                              />
                             ) : (
                               <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 font-black text-lg flex items-center justify-center">
                                 {soc.name.substring(0, 2).toUpperCase()}
@@ -1307,19 +1419,19 @@ const AdminDashboard = () => {
                         {/* Social Links Row */}
                         <div className="flex items-center gap-2 mb-4 text-xs text-slate-400">
                           {social.whatsapp && (
-                            <a href={social.whatsapp} target="_blank" rel="noreferrer" className="p-1.5 bg-slate-800 hover:bg-emerald-600 hover:text-white rounded-lg transition" title="WhatsApp Channel / Group">
+                            <MediaLink href={social.whatsapp} target="_blank" rel="noreferrer" className="p-1.5 bg-slate-800 hover:bg-emerald-600 hover:text-white rounded-lg transition" title="WhatsApp Channel / Group">
                               <Phone size={13} />
-                            </a>
+                            </MediaLink>
                           )}
                           {social.facebook && (
-                            <a href={social.facebook} target="_blank" rel="noreferrer" className="p-1.5 bg-slate-800 hover:bg-blue-600 hover:text-white rounded-lg transition" title="Facebook Page">
+                            <MediaLink href={social.facebook} target="_blank" rel="noreferrer" className="p-1.5 bg-slate-800 hover:bg-blue-600 hover:text-white rounded-lg transition" title="Facebook Page">
                               <Globe size={13} />
-                            </a>
+                            </MediaLink>
                           )}
                           {social.website && (
-                            <a href={social.website} target="_blank" rel="noreferrer" className="p-1.5 bg-slate-800 hover:bg-indigo-600 hover:text-white rounded-lg transition" title="Official Website">
+                            <MediaLink href={social.website} target="_blank" rel="noreferrer" className="p-1.5 bg-slate-800 hover:bg-indigo-600 hover:text-white rounded-lg transition" title="Official Website">
                               <ExternalLink size={13} />
-                            </a>
+                            </MediaLink>
                           )}
                           {soc.contact_email && (
                             <span className="text-[11px] text-slate-500 truncate" title={soc.contact_email}>
@@ -1445,17 +1557,22 @@ const AdminDashboard = () => {
                 {/* Executive role filter — only shown on executive sub-tab */}
                 {credentialsSubTab === 'executive' && (
                   <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
-                    {['all', 'president', 'faculty', 'admin'].map(r => (
-                      <button
-                        key={r}
-                        onClick={() => setRoleFilter(r)}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold capitalize transition cursor-pointer ${
-                          roleFilter === r ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        {r === 'faculty' ? 'Faculty' : r === 'all' ? `All (${filteredExecutiveUsers.length})` : r}
-                      </button>
-                    ))}
+                    {['all', 'president', 'faculty', 'admin'].map(r => {
+                      const count = r === 'all' 
+                        ? usersList.filter(isExecutiveUser).length
+                        : usersList.filter(u => isExecutiveUser(u) && getEffectiveUserRole(u) === r).length;
+                      return (
+                        <button
+                          key={r}
+                          onClick={() => setRoleFilter(r)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold capitalize transition cursor-pointer ${
+                            roleFilter === r ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {r === 'faculty' ? 'Faculty' : r === 'all' ? 'All' : r} ({count})
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
 
@@ -1546,7 +1663,7 @@ const AdminDashboard = () => {
                                 'bg-slate-800 text-slate-300 border border-slate-700'
                               }`}>
                                 {u.avatar_url ? (
-                                  <img src={u.avatar_url} alt={u.username} className="w-full h-full object-cover" />
+                                  <MediaImage src={u.avatar_url} alt={u.username} className="w-full h-full object-cover" />
                                 ) : (
                                   u.first_name ? u.first_name.charAt(0) : u.username.charAt(0)
                                 )}
@@ -1584,15 +1701,15 @@ const AdminDashboard = () => {
                             <div className="space-y-1.5">
                               <div className="flex items-center gap-2">
                                 <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border inline-flex items-center gap-1 ${
-                                  u.role === 'admin' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' :
-                                  u.role === 'faculty' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30' :
-                                  u.role === 'president' ? 'bg-violet-500/10 text-violet-400 border-violet-500/30' :
+                                  getEffectiveUserRole(u) === 'admin' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' :
+                                  getEffectiveUserRole(u) === 'faculty' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30' :
+                                  getEffectiveUserRole(u) === 'president' ? 'bg-violet-500/10 text-violet-400 border-violet-500/30' :
                                   'bg-slate-800 text-slate-300 border-slate-700'
                                 }`}>
-                                  {u.role === 'admin' && <ShieldCheck size={11} />}
-                                  {u.role === 'president' && <Award size={11} />}
-                                  {u.role === 'faculty' && <Users size={11} />}
-                                  {u.role === 'faculty' ? 'Faculty Advisor' : u.role}
+                                  {getEffectiveUserRole(u) === 'admin' && <ShieldCheck size={11} />}
+                                  {getEffectiveUserRole(u) === 'president' && <Award size={11} />}
+                                  {getEffectiveUserRole(u) === 'faculty' && <Users size={11} />}
+                                  {getEffectiveUserRole(u) === 'faculty' ? 'Faculty Advisor' : getEffectiveUserRole(u)}
                                 </span>
 
                                 <button
@@ -1607,7 +1724,7 @@ const AdminDashboard = () => {
 
                               <div className="text-slate-300">
                                 <span className="font-bold text-white text-xs block">
-                                  {u.society_name ? `🏛️ ${u.society_name}` : '🌐 Campus Wide'}
+                                  {getEffectiveSocietyName(u) ? `🏛️ ${getEffectiveSocietyName(u)}` : '🌐 Campus Wide'}
                                 </span>
                                 {u.department && (
                                   <span className="text-[10px] text-slate-400 block">{u.department}</span>
@@ -1737,7 +1854,7 @@ const AdminDashboard = () => {
                     <div className="flex items-center gap-5">
                       <div className="w-20 h-20 rounded-2xl overflow-hidden shadow-xl border-2 border-indigo-500/40 shrink-0">
                         {selectedStudentProfile.avatar_url ? (
-                          <img src={selectedStudentProfile.avatar_url} alt={selectedStudentProfile.username} className="w-full h-full object-cover" />
+                          <MediaImage src={selectedStudentProfile.avatar_url} alt={selectedStudentProfile.username} className="w-full h-full object-cover" />
                         ) : (
                           <div className="w-full h-full bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white font-black text-3xl">
                             {(selectedStudentProfile.first_name || selectedStudentProfile.username).charAt(0).toUpperCase()}
@@ -1963,14 +2080,14 @@ const AdminDashboard = () => {
                                 </div>
                               </div>
                               {hasSignedDoc && (
-                                <a
+                                <MediaLink
                                   href={getMediaUrl(prop.signed_proposal_file)}
                                   target="_blank"
                                   rel="noreferrer"
                                   className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded-lg flex items-center gap-1"
                                 >
                                   <Eye size={12} /> View Scan
-                                </a>
+                                </MediaLink>
                               )}
                             </div>
                           </div>
@@ -1983,12 +2100,25 @@ const AdminDashboard = () => {
                               <ShieldCheck size={14} /> Verify & Grant Sanction
                             </button>
 
-                            <button
-                              onClick={() => setSelectedProposalDoc(prop)}
-                              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                            >
-                              <FileText size={13} /> View / Print Form
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  const safeNo = (prop.proposal_no || 'Dossier').replace(/[^a-zA-Z0-9_-]/g, '_');
+                                  generateOfficialProposalPDF(prop, `Event_Proposal_${safeNo}.pdf`);
+                                }}
+                                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-emerald-600/30 cursor-pointer"
+                                title="Download official PDF proposal dossier directly"
+                              >
+                                <Download size={14} /> Download PDF
+                              </button>
+
+                              <button
+                                onClick={() => setSelectedProposalDoc(prop)}
+                                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <Eye size={13} /> View Proposal
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );
@@ -2029,7 +2159,7 @@ const AdminDashboard = () => {
                     {/* Event Poster Thumbnail */}
                     {(evt.poster_image_url || evt.image) && (
                       <div className="w-full h-32 rounded-2xl overflow-hidden mb-3 bg-slate-950 border border-slate-800">
-                        <img 
+                        <MediaImage 
                           src={evt.poster_image_url || evt.image} 
                           alt={evt.title} 
                           className="w-full h-full object-cover" 
@@ -2402,7 +2532,7 @@ const AdminDashboard = () => {
                     return (
                       <div key={g.id} className="bg-slate-900/90 border border-slate-800 rounded-3xl overflow-hidden shadow-xl flex flex-col justify-between hover:border-slate-700 transition">
                         <div className="relative aspect-video bg-slate-950 overflow-hidden">
-                          <img
+                          <MediaImage
                             src={g.image_url || g.image}
                             alt={g.title || 'Gallery item'}
                             className="w-full h-full object-cover"
@@ -3055,7 +3185,7 @@ const AdminDashboard = () => {
                     />
                     {/* Optional: Show existing QR if one is already saved */}
                     {existingQrUrl && (
-                      <img src={existingQrUrl} alt="Saved QR" className="w-10 h-10 rounded bg-white p-1 object-contain" />
+                      <MediaImage src={existingQrUrl} alt="Saved QR" className="w-10 h-10 rounded bg-white p-1 object-contain" />
                     )}
                   </div>
                   <p className="text-xs text-gray-500 mt-1">Students will scan this via banking/wallet apps to pay ticket fees.</p>
@@ -3435,26 +3565,76 @@ const AdminDashboard = () => {
                 </p>
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-bold uppercase tracking-wider text-[11px] mb-1.5">
-                  Transfer Society Leadership Responsibility
-                </label>
-                <select
-                  value={newSocietyVal}
-                  onChange={e => setNewSocietyVal(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500 font-bold"
-                >
-                  <option value="">— Campus Wide / Detach from Society —</option>
-                  {societies.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.category || 'General'})
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[10px] text-slate-500 mt-1">
-                  Selecting a society will link this user as the designated President or Faculty Advisor of the selected departmental society.
-                </p>
-              </div>
+              {newRoleVal === 'faculty' ? (
+                <div>
+                  <label className="block text-slate-300 font-bold uppercase tracking-wider text-[11px] mb-1.5 flex items-center justify-between">
+                    <span>Assigned Departmental Societies (Multi-Select)</span>
+                    <span className="text-[10px] text-indigo-400 font-mono font-bold">
+                      {newFacultySocieties.length} Selected
+                    </span>
+                  </label>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto p-2.5 bg-slate-950 border border-slate-800 rounded-xl">
+                    {societies.length === 0 ? (
+                      <p className="text-slate-500 text-[11px]">No societies available.</p>
+                    ) : (
+                      societies.map(s => {
+                        const isChecked = newFacultySocieties.includes(s.id);
+                        return (
+                          <label
+                            key={s.id}
+                            className={`flex items-center gap-2.5 p-2 rounded-lg cursor-pointer transition text-xs select-none ${
+                              isChecked ? 'bg-indigo-950/60 text-white font-bold border border-indigo-700/50' : 'text-slate-300 hover:bg-slate-900'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={e => {
+                                if (e.target.checked) {
+                                  setNewFacultySocieties([...newFacultySocieties, s.id]);
+                                } else {
+                                  setNewFacultySocieties(newFacultySocieties.filter(id => id !== s.id));
+                                }
+                              }}
+                              className="w-4 h-4 rounded text-indigo-600 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                            />
+                            <span className="truncate">{s.name}</span>
+                            {s.advisor && s.advisor !== roleTransferTarget.id && (
+                              <span className="ml-auto text-[10px] text-amber-400 font-normal">
+                                (Has Advisor: {s.advisor_name || s.advisor_full_name || 'Assigned'})
+                              </span>
+                            )}
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Faculty Advisors can oversee multiple societies simultaneously. Check all societies this advisor manages.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-slate-300 font-bold uppercase tracking-wider text-[11px] mb-1.5">
+                    Transfer Society Leadership Responsibility
+                  </label>
+                  <select
+                    value={newSocietyVal}
+                    onChange={e => setNewSocietyVal(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500 font-bold"
+                  >
+                    <option value="">— Campus Wide / Detach from Society —</option>
+                    {societies.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.category || 'General'})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Selecting a society will link this user as the designated President of the selected departmental society.
+                  </p>
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
                 <button
@@ -4091,7 +4271,7 @@ const AdminDashboard = () => {
                 )}
                 {eventForm.poster_image_url && (
                   <div className="mt-2.5 relative w-full h-40 rounded-xl overflow-hidden border border-slate-800 bg-slate-950">
-                    <img 
+                    <MediaImage 
                       src={eventForm.poster_image_url} 
                       alt="Event Poster" 
                       className="w-full h-full object-cover" 

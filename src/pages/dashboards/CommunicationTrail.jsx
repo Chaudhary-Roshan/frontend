@@ -19,7 +19,7 @@ const CommunicationTrail = () => {
 
   useEffect(() => {
     if (user?.society) fetchMessages();
-  }, [user]);
+  }, [user?.society]);
 
   const handleSend = async (e) => {
     e.preventDefault();

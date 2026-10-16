@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#1e1b4b" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+
+  <!-- Subtle glow ring -->
+  <circle cx="256" cy="256" r="180" stroke="rgba(255,255,255,0.12)" stroke-width="4" stroke-dasharray="12 8" />
+
+  <!-- Shield Base -->
+  <g filter="url(#shadow)">
+    <path d="M256 100 L380 160 V280 C380 365 256 420 256 420 C256 420 132 365 132 280 V160 Z" fill="#ffffff" />
+    <path d="M256 124 L356 174 V274 C356 342 256 392 256 392 C256 392 156 342 156 274 V174 Z" fill="url(#bgGrad)" />
+  </g>
+
+  <!-- Golden Star on Top -->
+  <polygon points="256,150 264,170 286,170 268,184 274,204 256,192 238,204 244,184 226,170 248,170" fill="url(#goldGrad)" />
+
+  <!-- Academic Cap / Ribbon Motif -->
+  <path d="M190 250 L256 220 L322 250 L256 280 Z" fill="#ffffff" />
+  <path d="M220 268 V300 C220 315 292 315 292 300 V268" stroke="#ffffff" stroke-width="6" fill="none" stroke-linecap="round" />
+  <circle cx="322" cy="250" r="4" fill="#fbbf24" />
+  <path d="M322 254 V290" stroke="#fbbf24" stroke-width="4" stroke-linecap="round" />
+
+  <!-- Modern App Monogram -->
+  <text x="256" y="360" font-family="'Outfit', system-ui, -apple-system, sans-serif" font-size="44" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="4">DSMS</text>
+</svg>

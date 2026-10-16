@@ -1,4 +1,5 @@
 import api from './api';
+import { getMediaUrl } from './media';
 
 /**
  * Converts a browser File/Blob to a Base64 Data URL for instant offline preview/storage.
@@ -23,7 +24,7 @@ export const uploadFileToServer = async (file, folder = '') => {
     if (folder) formData.append('folder', folder);
     const res = await api.post('upload/', formData);
     if (res.data?.url) {
-      return res.data.url;
+      return getMediaUrl(res.data.url);
     }
   } catch (err) {
     console.warn("Backend /api/upload/ failed, using local Data URL fallback:", err);
@@ -44,7 +45,7 @@ export const uploadFilesToServer = async (fileList, folder = '') => {
     if (folder) formData.append('folder', folder);
     const res = await api.post('upload/', formData);
     if (res.data?.urls && res.data.urls.length > 0) {
-      return res.data.urls;
+      return res.data.urls.map(u => getMediaUrl(u));
     }
   } catch (err) {
     console.warn("Bulk upload to server failed, falling back to local Data URLs:", err);

@@ -1,11 +1,12 @@
+import { MediaLink, MediaImage } from '../common/AuthenticatedMedia';
 import React, { useState } from 'react';
 import { 
   Printer, Download, UploadCloud, CheckCircle2, AlertTriangle, 
   XCircle, Clock, ShieldCheck, FileText, ChevronRight, Eye, 
-  ExternalLink, Check, Calendar, MapPin, DollarSign, Users, Award, X
+  ExternalLink, Check, Calendar, MapPin, DollarSign, Users, Award, X, Loader2
 } from 'lucide-react';
 import api from '../../utils/api';
-import { getMediaUrl } from '../../utils/media';
+import { generateOfficialProposalPDF } from '../../utils/officialPdfGenerator';
 
 const STATUS_CONFIG = {
   draft: { label: 'Draft', color: 'bg-slate-100 text-slate-700 border-slate-300' },
@@ -37,6 +38,7 @@ export default function EventProposalDocumentModal({
 }) {
   const [activeTab, setActiveTab] = useState('document'); // 'document' | 'verification' | 'history'
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isDownloadingPDF, setIsDownloadingPDF] = useState(false);
   const [toast, setToast] = useState(null);
 
   // Signed document upload state
@@ -91,6 +93,30 @@ export default function EventProposalDocumentModal({
       window.print();
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  // Handler: 1-Click Direct Multi-Page PDF Download
+  const handleDirectDownloadPDF = async () => {
+    try {
+      setIsDownloadingPDF(true);
+      if (['draft', 'generated'].includes(proposal.status)) {
+        try {
+          const res = await api.post(`proposals/${proposal.id}/mark_downloaded/`);
+          if (onProposalUpdated) onProposalUpdated(res.data);
+        } catch (e) {
+          console.warn("Could not mark downloaded:", e);
+        }
+      }
+      const safeNo = (proposal.proposal_no || 'Dossier').replace(/[^a-zA-Z0-9_-]/g, '_');
+      generateOfficialProposalPDF(proposal, `Event_Proposal_${safeNo}.pdf`);
+      showToast("Official Event Proposal PDF downloaded successfully!", "success");
+    } catch (err) {
+      console.error("Direct PDF download error:", err);
+      showToast("Direct PDF export encountered an issue. Opening Print preview...", "info");
+      window.print();
+    } finally {
+      setIsDownloadingPDF(false);
     }
   };
 
@@ -188,7 +214,7 @@ export default function EventProposalDocumentModal({
   const totalBudget = proposal.budget || budgetList.reduce((acc, it) => acc + (parseFloat(it.cost || it.estimated_cost || 0)), 0);
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 print:absolute print:inset-0 print:p-0 print:bg-white print:block print:overflow-visible print:z-[99999]">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 print:absolute print:inset-0 print:p-0 print:bg-white print:block print:overflow-visible print:z-[99999] modal-print-wrapper">
       
       {/* Toast Notification */}
       {toast && (
@@ -203,7 +229,7 @@ export default function EventProposalDocumentModal({
       )}
 
       {/* Main Container */}
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-5xl overflow-hidden my-auto flex flex-col max-h-[94vh] print:max-w-none print:block print:max-h-none print:border-none print:shadow-none print:rounded-none">
+      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-5xl overflow-hidden my-auto flex flex-col max-h-[94vh] print:max-w-none print:block print:max-h-none print:border-none print:shadow-none print:rounded-none modal-print-container">
         
         {/* MODAL HEADER - Hidden in Print */}
         <div className="bg-slate-900 text-white p-4 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 print:hidden shrink-0">
@@ -232,7 +258,25 @@ export default function EventProposalDocumentModal({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
-            {/* Download / Print PDF Button */}
+            {/* Direct 1-Click PDF Download Button */}
+            <button
+              onClick={handleDirectDownloadPDF}
+              disabled={isDownloadingPDF}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-emerald-600/30 transition cursor-pointer disabled:opacity-50"
+              title="Download official PDF proposal dossier directly"
+            >
+              {isDownloadingPDF ? (
+                <>
+                  <Loader2 size={15} className="animate-spin" /> Generating PDF...
+                </>
+              ) : (
+                <>
+                  <Download size={15} /> Download PDF
+                </>
+              )}
+            </button>
+
+            {/* Print / Save PDF Button */}
             <button
               onClick={handlePrintAndDownload}
               disabled={isProcessing}
@@ -244,14 +288,14 @@ export default function EventProposalDocumentModal({
 
             {/* View Signed Document Scan if available */}
             {proposal.signed_proposal_file && (
-              <a
+              <MediaLink
                 href={getMediaUrl(proposal.signed_proposal_file)}
                 target="_blank"
                 rel="noreferrer"
                 className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition"
               >
                 <Eye size={14} /> View Signed Scan
-              </a>
+              </MediaLink>
             )}
 
             {/* Close Button */}
@@ -293,7 +337,10 @@ export default function EventProposalDocumentModal({
         <div className="overflow-y-auto p-4 sm:p-8 space-y-6 flex-1 bg-slate-50/50 print:bg-white print:p-0 print:overflow-visible print:block">
           
           {/* THE OFFICIAL STATUTORY PROPOSAL DOCUMENT */}
-          <div className="bg-white p-6 sm:p-12 rounded-2xl border border-slate-200 shadow-sm print:shadow-none print:border-none print:p-0 max-w-4xl mx-auto font-serif text-slate-900 space-y-8 print:space-y-6">
+          <div 
+            id="official-proposal-document"
+            className="proposal-print-document bg-white p-6 sm:p-12 rounded-2xl border border-slate-200 shadow-sm print:shadow-none print:border-none print:p-0 print:m-0 max-w-4xl mx-auto font-serif text-slate-900 space-y-8 print:space-y-6"
+          >
               
               {/* DOCUMENT HEADER */}
               <div className="text-center border-b-2 border-slate-900 pb-6 space-y-1">
@@ -360,7 +407,7 @@ export default function EventProposalDocumentModal({
                   <div className="mt-3 pt-3 border-t border-slate-200">
                     <span className="text-slate-500 font-bold block text-[11px] mb-1.5 uppercase">Attached Event Poster / Publicity Material:</span>
                     <div className="w-full max-w-md h-48 rounded-xl overflow-hidden border border-slate-300 shadow-sm bg-slate-100">
-                      <img 
+                      <MediaImage 
                         src={proposal.event_image || proposal.poster_image_url} 
                         alt={proposal.event_title} 
                         className="w-full h-full object-cover" 
@@ -404,6 +451,24 @@ export default function EventProposalDocumentModal({
                     <span className="text-slate-500 font-bold block">Target Audience:</span>
                     <span className="font-semibold text-slate-900">{proposal.target_audience || 'University Students & Faculty'}</span>
                   </div>
+                  <div>
+                    <span className="text-slate-500 font-bold block">Eligibility Scope:</span>
+                    <span className={`font-bold inline-block px-2 py-0.5 rounded text-[11px] mt-0.5 ${
+                      proposal.eligibility_type === 'restricted'
+                        ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                        : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                    }`}>
+                      {proposal.eligibility_type === 'restricted'
+                        ? '🔒 Department & Degree Program Restricted'
+                        : '🌐 Open to All University Students'}
+                    </span>
+                  </div>
+                  {proposal.eligibility_type === 'restricted' && Array.isArray(proposal.allowed_programs) && proposal.allowed_programs.length > 0 && (
+                    <div className="sm:col-span-2 p-2 bg-slate-50 border border-slate-200 rounded">
+                      <span className="text-slate-500 font-bold block text-[10px] uppercase tracking-wider">Permitted Degree Programs:</span>
+                      <span className="font-semibold text-slate-800 text-[11px]">{proposal.allowed_programs.join(', ')}</span>
+                    </div>
+                  )}
                   <div className="sm:col-span-2">
                     <span className="text-slate-500 font-bold block">Expected Guests or Speakers:</span>
                     <span className="font-semibold text-slate-900">{proposal.guests || 'Distinguished academic faculty, industry experts, and keynote guest speakers.'}</span>
@@ -508,13 +573,13 @@ export default function EventProposalDocumentModal({
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
                   
                   {/* BOX 1: PREPARED BY (PRESIDENT) */}
-                  <div className="p-4 rounded-xl border border-slate-300 bg-slate-50/50 space-y-3 flex flex-col justify-between">
+                  <div className="p-5 rounded-xl border border-slate-300 bg-slate-50/50 space-y-3 flex flex-col justify-between">
                     <div>
                       <span className="font-black uppercase text-[11px] text-slate-700 block mb-2 border-b border-slate-200 pb-1">
-                        Prepared By:
+                        1. Society President Attestation:
                       </span>
                       <p><strong>Name:</strong> {proposal.president_name || currentUser?.full_name || 'Society President'}</p>
                       <p><strong>Designation:</strong> President, {proposal.society_name}</p>
@@ -528,10 +593,10 @@ export default function EventProposalDocumentModal({
                   </div>
 
                   {/* BOX 2: ADVISOR REVIEW */}
-                  <div className="p-4 rounded-xl border border-slate-300 bg-slate-50/50 space-y-3 flex flex-col justify-between">
+                  <div className="p-5 rounded-xl border border-slate-300 bg-slate-50/50 space-y-3 flex flex-col justify-between">
                     <div>
                       <span className="font-black uppercase text-[11px] text-slate-700 block mb-2 border-b border-slate-200 pb-1">
-                        Advisor Review:
+                        2. Faculty Advisor Endorsement:
                       </span>
                       <p><strong>Advisor Name:</strong> {proposal.advisor_name || 'Faculty Advisor'}</p>
                       <p className="pt-1"><strong>Comments:</strong> <span className="italic text-slate-700">{proposal.advisor_comments || 'Reviewed and endorsed for physical compliance.'}</span></p>
@@ -554,25 +619,6 @@ export default function EventProposalDocumentModal({
                         {proposal.signed_proposal_file ? `✍️ Signed on Paper` : '___________________'}
                       </span></p>
                       <p>Date: {proposal.uploaded_at ? new Date(proposal.uploaded_at).toLocaleDateString() : '_________________'}</p>
-                    </div>
-                  </div>
-
-                  {/* BOX 3: FOR OFFICE USE */}
-                  <div className="p-4 rounded-xl border border-slate-300 bg-slate-50/50 space-y-3 flex flex-col justify-between">
-                    <div>
-                      <span className="font-black uppercase text-[11px] text-slate-700 block mb-2 border-b border-slate-200 pb-1">
-                        For Office Use:
-                      </span>
-                      <p><strong>Verified By:</strong> {proposal.approved_by_name || (proposal.status === 'approved' ? 'Society Admin Office' : 'Pending Verification')}</p>
-                      <p><strong>Verification Date:</strong> {proposal.approved_at ? new Date(proposal.approved_at).toLocaleDateString() : 'Pending'}</p>
-                      <p><strong>Final Status:</strong> <span className="font-bold text-slate-900 uppercase">{proposal.status}</span></p>
-                      <p className="pt-1"><strong>Official Remarks:</strong> <span className="text-slate-600">{proposal.official_remarks || 'Statutory physical sign-off verified.'}</span></p>
-                    </div>
-
-                    <div className="pt-6 border-t border-slate-200 text-slate-500 text-center">
-                      <div className="border border-dashed border-slate-400 p-2 rounded text-[10px] uppercase font-bold text-slate-400">
-                        {proposal.status === 'approved' ? 'OFFICIAL CAMPUS SEAL APPLIED' : 'OFFICE STAMP / EMBOSS'}
-                      </div>
                     </div>
                   </div>
 
@@ -612,14 +658,14 @@ export default function EventProposalDocumentModal({
                         </div>
                       </div>
 
-                      <a
+                      <MediaLink
                         href={getMediaUrl(proposal.signed_proposal_file)}
                         target="_blank"
                         rel="noreferrer"
                         className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
                       >
                         <ExternalLink size={13} /> View Uploaded Scan
-                      </a>
+                      </MediaLink>
                     </div>
                   ) : (
                     <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-2">

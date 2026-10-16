@@ -1,5 +1,7 @@
+import { MediaImage } from '../components/common/AuthenticatedMedia';
 import React, { useEffect, useState } from 'react';
 import api from '../utils/api';
+import { getMediaUrl, handleImageError } from '../utils/media';
 import { Megaphone, Search, Calendar } from 'lucide-react';
 
 const News = () => {
@@ -160,7 +162,12 @@ const News = () => {
                   <div className="flex items-center gap-3 border-t border-slate-100 pt-5 mt-6">
                     <div className="w-10 h-10 rounded-2xl overflow-hidden shadow-sm shrink-0">
                       {news.society_logo ? (
-                        <img src={news.society_logo} alt={news.author_society || news.author_name} className="w-full h-full object-cover" />
+                        <MediaImage
+                          src={getMediaUrl(news.society_logo)}
+                          onError={handleImageError}
+                          alt={news.author_society || news.author_name}
+                          className="w-full h-full object-cover"
+                        />
                       ) : (
                         <div className="w-full h-full bg-gradient-to-br from-indigo-100 to-violet-100 flex items-center justify-center text-indigo-700 font-black text-sm uppercase">
                           {news.author_name ? news.author_name[0] : 'U'}

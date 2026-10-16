@@ -1,10 +1,13 @@
+import { MediaImage } from '../common/AuthenticatedMedia';
 import React, { useState } from 'react';
 import { 
   X, Plus, Trash2, Calendar, Clock, MapPin, DollarSign, 
-  Users, Sparkles, AlertCircle, FileText, CheckCircle2 
+  Users, Sparkles, AlertCircle, FileText, CheckCircle2,
+  GraduationCap, CheckSquare, Square, Shield
 } from 'lucide-react';
 import api from '../../utils/api';
 import { uploadFileToServer } from '../../utils/fileUpload';
+import AcademicScopeSelector from '../common/AcademicScopeSelector';
 
 const DEFAULT_FACILITIES = [
   'Auditorium or classroom',
@@ -68,6 +71,11 @@ export default function CreateProposalModal({
   const [errorMsg, setErrorMsg] = useState(null);
   const [dateAvailability, setDateAvailability] = useState(null);
   const [isCheckingDate, setIsCheckingDate] = useState(false);
+
+  // Audience & Department Eligibility State
+  const [eligibilityType, setEligibilityType] = useState('all'); // 'all' | 'restricted'
+  const [selectedDepartments, setSelectedDepartments] = useState([]);
+  const [selectedPrograms, setSelectedPrograms] = useState([]);
 
   // Compute live total budget
   const totalBudget = budgetItems.reduce((acc, it) => acc + (parseFloat(it.cost) || 0), 0);
@@ -149,10 +157,24 @@ export default function CreateProposalModal({
       setErrorMsg("Please specify a valid ticket price (minimum PKR 10) for paid event proposals.");
       return;
     }
+    if (eligibilityType === 'restricted') {
+      if (selectedDepartments.length === 0) {
+        setErrorMsg("Please select at least one department for restricted eligibility.");
+        return;
+      }
+      if (selectedPrograms.length === 0) {
+        setErrorMsg("Please select at least one degree program for restricted eligibility.");
+        return;
+      }
+    }
 
     try {
       setIsSubmitting(true);
       setErrorMsg(null);
+
+      const computedAudience = eligibilityType === 'restricted'
+        ? `Exclusively restricted to: ${selectedDepartments.join(', ')} (${selectedPrograms.join(', ')})`
+        : form.target_audience;
 
       const payload = {
         society: society?.id,
@@ -167,10 +189,13 @@ export default function CreateProposalModal({
         poster_image_url: form.poster_image_url,
         is_paid: isPaid,
         ticket_price: isPaid ? (parseFloat(ticketPrice) || 0) : 0,
+        eligibility_type: eligibilityType,
+        allowed_departments: eligibilityType === 'restricted' ? selectedDepartments : [],
+        allowed_programs: eligibilityType === 'restricted' ? selectedPrograms : [],
         objectives: form.objectives,
         event_description: form.event_description,
         expected_participants: parseInt(form.expected_participants) || 100,
-        target_audience: form.target_audience,
+        target_audience: computedAudience,
         guests: form.guests,
         required_facilities: selectedFacilities.join('\n• '),
         budget_items: budgetItems,
@@ -271,7 +296,7 @@ export default function CreateProposalModal({
                 )}
                 {form.poster_image_url && (
                   <div className="mt-3 relative w-full h-44 rounded-xl overflow-hidden border border-slate-200 shadow-sm bg-slate-900">
-                    <img 
+                    <MediaImage 
                       src={form.poster_image_url} 
                       alt="Event Poster Preview" 
                       className="w-full h-full object-cover" 
@@ -447,6 +472,16 @@ export default function CreateProposalModal({
                   </div>
                 )}
               </div>
+
+              {/* AUDIENCE SCOPE & DEPARTMENT ELIGIBILITY (WITH LIVE SEARCH & FACULTY FILTER) */}
+              <AcademicScopeSelector
+                eligibilityType={eligibilityType}
+                setEligibilityType={setEligibilityType}
+                selectedDepartments={selectedDepartments}
+                setSelectedDepartments={setSelectedDepartments}
+                selectedPrograms={selectedPrograms}
+                setSelectedPrograms={setSelectedPrograms}
+              />
             </div>
           </div>
 

@@ -3,26 +3,30 @@ import { AuthContext } from '../../context/AuthContext';
 import api from '../../utils/api';
 import { 
   FileText, Download, Printer, ShieldCheck, Award, 
-  Calendar, CheckCircle2, Clock, Users, ArrowLeft, QrCode
+  Calendar, CheckCircle2, Clock, Users, ArrowLeft, QrCode, Loader2
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import QRCode from 'react-qr-code';
+import { generateOfficialTranscriptPDF } from '../../utils/officialPdfGenerator';
 
 const CoCurricularTranscript = () => {
   const { user } = useContext(AuthContext);
+  const [profile, setProfile] = useState(null);
   const [registrations, setRegistrations] = useState([]);
   const [certificates, setCertificates] = useState([]);
   const [memberships, setMemberships] = useState([]);
   const [volunteerHours, setVolunteerHours] = useState([]);
   const [cabinetPositions, setCabinetPositions] = useState([]);
+  const [isDownloadingPDF, setIsDownloadingPDF] = useState(false);
 
   useEffect(() => {
     fetchTranscriptData();
-  }, [user]);
+  }, []);
 
   const fetchTranscriptData = async () => {
     try {
-      const [regRes, certRes, memRes, volRes, cabRes] = await Promise.allSettled([
+      const [profRes, regRes, certRes, memRes, volRes, cabRes] = await Promise.allSettled([
+        api.get('auth/profile/'),
         api.get('registrations/'),
         api.get('certificates/'),
         api.get('memberships/'),
@@ -30,6 +34,9 @@ const CoCurricularTranscript = () => {
         api.get('cabinet/')
       ]);
 
+      if (profRes.status === 'fulfilled') {
+        setProfile(profRes.value.data);
+      }
       if (regRes.status === 'fulfilled') {
         // Only attended events count on transcript
         setRegistrations(regRes.value.data.filter(r => r.attendance_status));
@@ -58,11 +65,51 @@ const CoCurricularTranscript = () => {
     (totalCertificates * 0.5)
   )).toFixed(2);
 
-  const verificationUrl = `${window.location.origin}/verify?user=${user?.username}`;
+  const verificationUrl = `${window.location.origin}/verify?user=${profile?.username || user?.username || ''}`;
+
+  const studentName = profile?.full_name || 
+    (profile?.first_name ? `${profile.first_name} ${profile.last_name || ''}`.trim() : null) || 
+    user?.full_name || 
+    (user?.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : null) || 
+    user?.username || 
+    'Student';
+
+  const departmentName = profile?.department || user?.department || 'Department of Information and Communication Engineering';
+  const rollNumber = profile?.roll_number || user?.roll_number || user?.username || 'N/A';
+  const programName = profile?.program || user?.program || '';
+
+  const handleDownloadPDF = async () => {
+    try {
+      setIsDownloadingPDF(true);
+      const safeRoll = (rollNumber || 'student').replace(/[^a-zA-Z0-9_-]/g, '_');
+      generateOfficialTranscriptPDF({
+        studentName,
+        rollNumber,
+        departmentName,
+        programName,
+        academicYear: profile?.batch || '2023-2027',
+        activityScore,
+        totalEventsAttended,
+        totalVolHours,
+        totalSocieties,
+        totalCertificates,
+        registrations,
+        volunteerHours,
+        cabinetPositions,
+        certificates,
+        verificationUrl
+      }, `CoCurricular_Transcript_${safeRoll}.pdf`);
+    } catch (err) {
+      console.error("PDF download error:", err);
+      alert("Could not generate PDF directly. Please use 'Print / Save as PDF'.");
+    } finally {
+      setIsDownloadingPDF(false);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-slate-100 py-10 px-4 sm:px-6 lg:px-8 font-sans">
-      <div className="max-w-4xl mx-auto space-y-6">
+    <div className="min-h-screen bg-slate-100 py-10 px-4 sm:px-6 lg:px-8 font-sans print:p-0 print:m-0 print:bg-white print:min-h-0">
+      <div className="max-w-4xl mx-auto space-y-6 print:space-y-0 print:max-w-none print:w-full">
 
         {/* TOP ACTION BAR (HIDDEN IN PRINT) */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm print:hidden">
@@ -75,6 +122,22 @@ const CoCurricularTranscript = () => {
 
           <div className="flex items-center gap-3">
             <button
+              onClick={handleDownloadPDF}
+              disabled={isDownloadingPDF}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-emerald-600/30 transition cursor-pointer disabled:opacity-50"
+              title="Download official PDF transcript directly"
+            >
+              {isDownloadingPDF ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" /> Generating PDF...
+                </>
+              ) : (
+                <>
+                  <Download size={16} /> Download PDF
+                </>
+              )}
+            </button>
+            <button
               onClick={() => window.print()}
               className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition cursor-pointer"
             >
@@ -84,7 +147,10 @@ const CoCurricularTranscript = () => {
         </div>
 
         {/* OFFICIAL TRANSCRIPT DOCUMENT */}
-        <div className="bg-white rounded-3xl p-8 sm:p-12 shadow-xl border-4 border-slate-200 print:border-none print:shadow-none print:p-0 space-y-8">
+        <div 
+          id="official-transcript-document"
+          className="transcript-print-document bg-white rounded-3xl p-8 sm:p-12 shadow-xl border-4 border-slate-200 print:border-none print:shadow-none print:p-0 print:rounded-none space-y-8"
+        >
           
           {/* HEADER LETTERHEAD */}
           <div className="text-center pb-6 border-b-2 border-slate-900 space-y-2">
@@ -106,15 +172,18 @@ const CoCurricularTranscript = () => {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-5 bg-slate-50 border border-slate-200 rounded-2xl text-xs">
             <div>
               <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">Student Name</span>
-              <span className="font-black text-slate-900 text-sm mt-0.5 block">{user?.first_name || user?.username}</span>
+              <span className="font-black text-slate-900 text-sm mt-0.5 block">{studentName}</span>
             </div>
             <div>
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">Username / ID</span>
-              <span className="font-bold text-slate-800 text-sm mt-0.5 block">{user?.username}</span>
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">Roll Number / ID</span>
+              <span className="font-bold text-slate-800 text-sm mt-0.5 block">{rollNumber}</span>
             </div>
             <div>
               <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">Department</span>
-              <span className="font-bold text-slate-800 text-sm mt-0.5 block">Computer Science & Eng.</span>
+              <span className="font-bold text-slate-800 text-sm mt-0.5 block">{departmentName}</span>
+              {programName && (
+                <span className="text-[10px] text-slate-500 font-semibold block">{programName}</span>
+              )}
             </div>
             <div>
               <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">Issue Date</span>
@@ -271,22 +340,22 @@ const CoCurricularTranscript = () => {
               <div className="text-left">
                 <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Tamper-Proof Verification</span>
                 <p className="text-xs font-bold text-slate-900">Scan QR Code to Verify Online</p>
-                <span className="text-[10px] text-slate-500 font-mono">HASH: {user?.id}x99-CO-CURRICULAR-OK</span>
+                <span className="text-[10px] text-slate-500 font-mono">HASH: {profile?.id || user?.id}x99-CO-CURRICULAR-OK</span>
               </div>
             </div>
 
             <div className="flex items-center gap-8 text-center text-xs font-bold text-slate-700">
               <div>
-                <div className="w-28 border-b border-slate-400 pb-1 mb-1">
-                  <span className="font-serif italic font-normal text-slate-600">Office Seal</span>
+                <div className="w-36 border-b border-slate-400 pb-1 mb-1">
+                  <span className="font-serif italic font-normal text-slate-600">✍️ Attested</span>
                 </div>
-                <span className="text-[10px] uppercase text-slate-400">Registrar Sign-Off</span>
+                <span className="text-[10px] uppercase text-slate-400">Society President</span>
               </div>
               <div>
-                <div className="w-28 border-b border-slate-400 pb-1 mb-1">
-                  <span className="font-serif italic font-normal text-slate-600">Student Affairs</span>
+                <div className="w-36 border-b border-slate-400 pb-1 mb-1">
+                  <span className="font-serif italic font-normal text-slate-600">✍️ Verified & Endorsed</span>
                 </div>
-                <span className="text-[10px] uppercase text-slate-400">Dean of Students</span>
+                <span className="text-[10px] uppercase text-slate-400">Faculty Advisor</span>
               </div>
             </div>
           </div>

@@ -1,3 +1,4 @@
+import { MediaImage, MediaLink } from '../../components/common/AuthenticatedMedia';
 import React, { useContext, useEffect, useState, useRef } from 'react';
 import { AuthContext } from '../../context/AuthContext';
 import { 
@@ -6,34 +7,48 @@ import {
   UserCheck, AlertCircle, ArrowRight, Printer, Sparkles,
   User, Mail, Phone, GraduationCap, Building, Edit3,
   Check, X, Landmark, MapPin, BadgeCheck, Copy,
-  UploadCloud, CreditCard, AlertTriangle, Lock
+  UploadCloud, CreditCard, AlertTriangle, Lock, Loader2
 } from 'lucide-react';
 import api from '../../utils/api';
 import QRCode from 'react-qr-code';
 import { Link } from 'react-router-dom';
 import { toPng, toJpeg } from 'html-to-image';
+import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import CertificateModal from '../../components/modals/CertificateModal';
 import CompleteProfileModal from '../../components/modals/CompleteProfileModal';
 import ImageUploader from '../../components/common/ImageUploader';
 import StudentDigitalWallet from '../../components/membership/StudentDigitalWallet';
-import { getMediaUrl } from '../../utils/media';
+import { getMediaUrl, handleImageError } from '../../utils/media';
 
-const TicketCard = ({ selectedTicket, type, userAvatar, defaultAvatar, displayName, profile }) => (
+const TicketCard = ({ selectedTicket, type, userAvatar, defaultAvatar, displayName, profile }) => {
+  const isExpired = Boolean(selectedTicket?.is_expired || (selectedTicket?.event_date && new Date(selectedTicket.event_date) < new Date()));
+  return (
   <div className="bg-white rounded-3xl w-[800px] shadow-xl overflow-hidden relative flex flex-row border border-slate-200 shrink-0 mx-auto">
     {/* Left Side: Header & Info */}
     <div className="flex-1 flex flex-col">
       <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-violet-700 text-white p-6 relative flex flex-col justify-between">
         <div className="flex items-center gap-2 mb-2">
           {selectedTicket.society_logo && (
-            <img src={selectedTicket.society_logo} alt={selectedTicket.society_name} className="w-7 h-7 rounded-lg object-cover border border-white/20" />
+            <MediaImage
+              src={getMediaUrl(selectedTicket.society_logo)}
+              onError={handleImageError}
+              alt={selectedTicket.society_name}
+              className="w-7 h-7 rounded-lg object-cover border border-white/20"
+            />
           )}
           <span className="text-[10px] font-black uppercase tracking-widest text-indigo-200 bg-white/20 px-2.5 py-0.5 rounded-full">
             {type}
           </span>
-          <span className="text-[10px] font-black uppercase tracking-wider text-emerald-300 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-400/30">
-            {selectedTicket.attendance_status ? 'Checked In ✓' : 'Confirmed'}
-          </span>
+          {isExpired ? (
+            <span className="text-[10px] font-black uppercase tracking-wider text-rose-200 bg-rose-950/80 px-2.5 py-0.5 rounded-full border border-rose-500/40">
+              {selectedTicket.attendance_status ? 'Concluded (Attended)' : 'Expired (Event Concluded)'}
+            </span>
+          ) : (
+            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-300 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-400/30">
+              {selectedTicket.attendance_status ? 'Checked In ✓' : 'Confirmed'}
+            </span>
+          )}
         </div>
         <div>
           <h2 className="text-2xl sm:text-3xl font-black leading-snug">
@@ -47,7 +62,7 @@ const TicketCard = ({ selectedTicket, type, userAvatar, defaultAvatar, displayNa
       <div className="p-6 flex-1 flex flex-col justify-between space-y-4">
         <div className="flex items-center gap-4 mb-2">
           <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-indigo-500/40 bg-slate-200 shrink-0">
-            <img
+            <MediaImage
               src={selectedTicket.student_avatar || userAvatar}
               alt={selectedTicket.student_name || displayName}
               className="w-full h-full object-cover"
@@ -112,14 +127,20 @@ const TicketCard = ({ selectedTicket, type, userAvatar, defaultAvatar, displayNa
         <p className="text-[10px] font-mono font-bold text-slate-500">
           REF: {selectedTicket.ticket_qr_code}
         </p>
+        {isExpired && !selectedTicket.attendance_status && (
+          <span className="mt-1 inline-block text-[9px] font-black uppercase tracking-wider text-rose-700 bg-rose-100 px-2 py-0.5 rounded border border-rose-300">
+            Admittance Expired
+          </span>
+        )}
       </div>
     </div>
   </div>
-);
+  );
+};
 
 
 const StudentDashboard = () => {
-  const { user } = useContext(AuthContext);
+  const { user, updateUser } = useContext(AuthContext);
   const [profile, setProfile] = useState(null);
   const [registrations, setRegistrations] = useState([]);
   const [certificates, setCertificates] = useState([]);
@@ -235,12 +256,29 @@ const StudentDashboard = () => {
     }
   };
 
+  const isFetchingVaultRef = useRef(false);
+
   useEffect(() => {
     fetchProfileAndVaultData();
-  }, [user]);
 
-  const fetchProfileAndVaultData = async () => {
-    setLoading(true);
+    const handleSync = (e) => {
+      // Avoid refetching when updating own profile or uploading files to prevent race conditions
+      if (e?.detail?.url?.includes('auth/profile/') || e?.detail?.url?.includes('upload')) return;
+      fetchProfileAndVaultData(true);
+    };
+
+    window.addEventListener('dsms:data_synced', handleSync);
+    return () => {
+      window.removeEventListener('dsms:data_synced', handleSync);
+    };
+  }, []);
+
+  const fetchProfileAndVaultData = async (isBackground = false) => {
+    if (isFetchingVaultRef.current) return;
+    isFetchingVaultRef.current = true;
+    if (!isBackground) {
+      setLoading(true);
+    }
     try {
       const [profRes, regRes, certRes, memRes, volRes, appRes, dutyRes] = await Promise.allSettled([
         api.get('auth/profile/'),
@@ -255,18 +293,24 @@ const StudentDashboard = () => {
       if (profRes.status === 'fulfilled') {
         const p = profRes.value.data;
         setProfile(p);
-        setEditForm({
-          first_name: p.first_name || '',
-          last_name: p.last_name || '',
-          father_name: p.father_name || '',
-          email: p.email || '',
-          roll_number: p.roll_number || '',
-          program: p.program || '',
-          department: p.department || '',
-          faculty_name: p.faculty_name || '',
-          phone_number: p.phone_number || '',
-          gender: p.gender || '',
-          avatar_url: p.avatar_url || ''
+        // Only initialize editForm if modal is NOT open, to avoid overwriting ongoing user edits
+        setShowEditProfileModal(isOpen => {
+          if (!isOpen) {
+            setEditForm({
+              first_name: p.first_name || '',
+              last_name: p.last_name || '',
+              father_name: p.father_name || '',
+              email: p.email || '',
+              roll_number: p.roll_number || '',
+              program: p.program || '',
+              department: p.department || '',
+              faculty_name: p.faculty_name || '',
+              phone_number: p.phone_number || '',
+              gender: p.gender || '',
+              avatar_url: p.avatar_url || p.profile_photo_url || ''
+            });
+          }
+          return isOpen;
         });
       }
       if (regRes.status === 'fulfilled') setRegistrations(regRes.value.data);
@@ -288,7 +332,10 @@ const StudentDashboard = () => {
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (!isBackground) {
+        setLoading(false);
+      }
+      isFetchingVaultRef.current = false;
     }
   };
 
@@ -297,12 +344,39 @@ const StudentDashboard = () => {
     sessionStorage.setItem('profileModalDismissed', 'true');
   };
 
+  const handleOpenEditProfile = () => {
+    if (profile) {
+      setEditForm({
+        first_name: profile.first_name || '',
+        last_name: profile.last_name || '',
+        father_name: profile.father_name || '',
+        email: profile.email || '',
+        roll_number: profile.roll_number || '',
+        program: profile.program || '',
+        department: profile.department || '',
+        faculty_name: profile.faculty_name || '',
+        phone_number: profile.phone_number || '',
+        gender: profile.gender || '',
+        avatar_url: profile.avatar_url || profile.profile_photo_url || ''
+      });
+    }
+    setShowEditProfileModal(true);
+  };
+
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
     setIsSaving(true);
     try {
-      const res = await api.patch('auth/profile/', editForm);
+      const payload = {
+        ...editForm,
+        avatar_url: editForm.avatar_url,
+        profile_photo_url: editForm.avatar_url
+      };
+      const res = await api.patch('auth/profile/', payload);
       setProfile(res.data);
+      if (updateUser) {
+        updateUser(res.data);
+      }
       setSaveSuccess(true);
       setTimeout(() => {
         setSaveSuccess(false);
@@ -372,50 +446,101 @@ const StudentDashboard = () => {
   };
 
   const ticketRef = useRef(null);
+  const [downloadingTicketPDF, setDownloadingTicketPDF] = useState(false);
 
   const printTicket = () => {
+    document.body.classList.add('printing-ticket-mode');
+    const handleAfterPrint = () => {
+      document.body.classList.remove('printing-ticket-mode');
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+    window.addEventListener('afterprint', handleAfterPrint);
     window.print();
   };
 
-  const downloadTicketImage = (format) => {
+  const downloadTicketImage = async (format) => {
     if (!ticketRef.current) return;
-    const convert = format === 'png' ? toPng : toJpeg;
-    convert(ticketRef.current, { quality: 0.95, pixelRatio: 2 })
-      .then((dataUrl) => {
-        const link = document.createElement('a');
-        link.download = `event-ticket-${selectedTicket?.ticket_number || selectedTicket?.ticket_qr_code || 'pass'}.${format}`;
-        link.href = dataUrl;
-        link.click();
-      })
-      .catch((err) => {
-        console.error("Image export error", err);
-        alert(`Failed to export ticket as ${format.toUpperCase()}`);
-      });
+    try {
+      let dataUrl = null;
+      const convert = format === 'png' ? toPng : toJpeg;
+      try {
+        dataUrl = await convert(ticketRef.current, { quality: 0.95, pixelRatio: 2.5, cacheBust: true });
+      } catch (err1) {
+        console.warn("toPng failed, falling back to html2canvas:", err1);
+        const canvas = await html2canvas(ticketRef.current, {
+          scale: 2.5,
+          useCORS: true,
+          allowTaint: false,
+          backgroundColor: '#ffffff'
+        });
+        dataUrl = canvas.toDataURL(format === 'png' ? 'image/png' : 'image/jpeg', 0.95);
+      }
+      const link = document.createElement('a');
+      link.download = `event-ticket-${selectedTicket?.ticket_number || selectedTicket?.ticket_qr_code || 'pass'}.${format}`;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.error("Image export error", err);
+      alert(`Failed to export ticket as ${format.toUpperCase()}`);
+    }
   };
 
-  const downloadTicketPDF = () => {
+  const downloadTicketPDF = async () => {
     if (!ticketRef.current) return;
-    toPng(ticketRef.current, { quality: 0.95, pixelRatio: 2 })
-      .then((dataUrl) => {
-        const pdf = new jsPDF('l', 'mm', 'a4');
-        const imgProps = pdf.getImageProperties(dataUrl);
-        const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-        const yOffset = Math.max(0, (pdf.internal.pageSize.getHeight() - pdfHeight) / 2);
-        pdf.addImage(dataUrl, 'PNG', 0, yOffset, pdfWidth, pdfHeight);
-        pdf.save(`event-ticket-${selectedTicket?.ticket_number || selectedTicket?.ticket_qr_code || 'pass'}.pdf`);
-      })
-      .catch((err) => {
-        console.error("PDF export error", err);
-        alert("Failed to export ticket as PDF");
-      });
+    try {
+      setDownloadingTicketPDF(true);
+      let dataUrl = null;
+      try {
+        dataUrl = await toPng(ticketRef.current, {
+          quality: 0.98,
+          pixelRatio: 2.5,
+          cacheBust: true,
+          style: { transform: 'none', margin: '0' }
+        });
+      } catch (err1) {
+        console.warn("toPng failed for ticket, falling back to html2canvas:", err1);
+        const canvas = await html2canvas(ticketRef.current, {
+          scale: 2.5,
+          useCORS: true,
+          allowTaint: false,
+          backgroundColor: '#ffffff'
+        });
+        dataUrl = canvas.toDataURL('image/png');
+      }
+
+      if (!dataUrl) throw new Error("Could not capture ticket image");
+
+      const pdf = new jsPDF('l', 'mm', 'a4');
+      const imgProps = pdf.getImageProperties(dataUrl);
+      const pageWidth = pdf.internal.pageSize.getWidth();   // 297mm
+      const pageHeight = pdf.internal.pageSize.getHeight(); // 210mm
+
+      let renderWidth = pageWidth - 20; // 10mm padding on sides
+      let renderHeight = (imgProps.height * renderWidth) / imgProps.width;
+
+      if (renderHeight > (pageHeight - 20)) {
+        renderHeight = pageHeight - 20;
+        renderWidth = (imgProps.width * renderHeight) / imgProps.height;
+      }
+
+      const xOffset = Math.max(0, (pageWidth - renderWidth) / 2);
+      const yOffset = Math.max(0, (pageHeight - renderHeight) / 2);
+
+      pdf.addImage(dataUrl, 'PNG', xOffset, yOffset, renderWidth, renderHeight);
+      pdf.save(`event-ticket-${selectedTicket?.ticket_number || selectedTicket?.ticket_qr_code || 'pass'}.pdf`);
+    } catch (err) {
+      console.error("PDF export error", err);
+      alert("Failed to export ticket as PDF. Please try the Print option.");
+    } finally {
+      setDownloadingTicketPDF(false);
+    }
   };
 
   const totalVolHours = volunteerHours.reduce((sum, v) => sum + parseFloat(v.hours || 0), 0);
 
   // Participant fallback image
   const defaultAvatar = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400&auto=format&fit=crop&q=80";
-  const userAvatar = profile?.avatar_url || defaultAvatar;
+  const userAvatar = profile?.avatar_url || profile?.profile_photo_url || user?.avatar_url || user?.profile_photo_url || defaultAvatar;
   const displayName = profile?.full_name || (profile?.first_name ? `${profile.first_name} ${profile.last_name || ''}`.trim() : profile?.username) || 'Student';
 
   const isProfileIncomplete = profile && (
@@ -477,7 +602,7 @@ const StudentDashboard = () => {
               {/* Profile Image / Avatar with status ring */}
               <div className="relative group">
                 <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl overflow-hidden border-4 border-white shadow-xl bg-slate-100 flex-shrink-0">
-                  <img
+                  <MediaImage
                     src={userAvatar}
                     alt={displayName}
                     className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
@@ -485,7 +610,7 @@ const StudentDashboard = () => {
                   />
                 </div>
                 <button
-                  onClick={() => setShowEditProfileModal(true)}
+                  onClick={handleOpenEditProfile}
                   className="absolute -bottom-2 -right-2 p-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl shadow-md transition cursor-pointer"
                   title="Update Profile & Avatar"
                 >
@@ -506,7 +631,12 @@ const StudentDashboard = () => {
                   {memberships.filter(m => m.role_title && m.role_title !== 'General Member').map(m => (
                     <span key={m.id} className="text-xs font-bold text-violet-700 bg-violet-50 border border-violet-200 px-2.5 py-1 rounded-full inline-flex items-center gap-1.5">
                       {m.society_logo && (
-                        <img src={m.society_logo} alt={m.society_name} className="w-3.5 h-3.5 rounded-sm object-cover" />
+                        <MediaImage
+                          src={getMediaUrl(m.society_logo)}
+                          onError={handleImageError}
+                          alt={m.society_name}
+                          className="w-3.5 h-3.5 rounded-sm object-cover"
+                        />
                       )}
                       {m.role_title} · {m.society_name}
                     </span>
@@ -560,7 +690,7 @@ const StudentDashboard = () => {
             {/* Header Actions */}
             <div className="flex flex-wrap items-center gap-3">
               <button
-                onClick={() => setShowEditProfileModal(true)}
+                onClick={handleOpenEditProfile}
                 className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 px-4 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 shadow-sm cursor-pointer"
               >
                 <Edit3 size={15} /> Edit Student Profile
@@ -645,21 +775,83 @@ const StudentDashboard = () => {
 
         {/* 2. DIGITAL WALLET & MEMBERSHIP CARDS */}
         <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-sm space-y-8">
-          <StudentDigitalWallet 
-            currentUser={{ 
-              ...user, 
-              ...profile,
-              name: profile?.full_name || profile?.name || user?.full_name || user?.name || user?.username,
-              roll_number: profile?.roll_number || user?.roll_number || 'N/A',
-              is_cabinet_member: Boolean(profile?.is_cabinet_member ?? user?.is_cabinet_member),
-              cabinet_role: profile?.cabinet_role || user?.cabinet_role || '',
-              cabinet_society_name: profile?.cabinet_society_name || user?.cabinet_society_name || profile?.society_name || user?.society_name || ''
-            }} 
-            memberships={memberships} 
-            onCardClick={setSelectedMembershipCard}
-          />
+          {(() => {
+            const approvedMemberships = (memberships || []).filter(m => m.status === 'active' && m.is_active);
+            const pendingMemberships = (memberships || []).filter(m => m.status === 'pending');
 
+            return (
+              <>
+                <StudentDigitalWallet 
+                  currentUser={{ 
+                    ...user, 
+                    ...profile,
+                    name: profile?.full_name || profile?.name || user?.full_name || user?.name || user?.username,
+                    roll_number: profile?.roll_number || user?.roll_number || 'N/A',
+                    is_cabinet_member: Boolean(
+                      profile?.is_cabinet_member || user?.is_cabinet_member ||
+                      (profile?.cabinet_positions && profile.cabinet_positions.some(c => c.is_active && c.is_verified)) ||
+                      (user?.cabinet_positions && user.cabinet_positions.some(c => c.is_active && c.is_verified))
+                    ),
+                    cabinet_role: profile?.cabinet_role || user?.cabinet_role || '',
+                    cabinet_society_name: profile?.cabinet_society_name || user?.cabinet_society_name || profile?.society_name || user?.society_name || '',
+                    cabinet_society_logo: profile?.cabinet_society_logo || user?.cabinet_society_logo || profile?.society_logo || user?.society_logo || ''
+                  }} 
+                  memberships={approvedMemberships} 
+                  onCardClick={setSelectedMembershipCard}
+                />
 
+                {/* PENDING MEMBERSHIP APPLICATIONS UNDER REVIEW */}
+                {pendingMemberships.length > 0 && (
+                  <div className="mt-6 p-5 sm:p-6 bg-gradient-to-r from-amber-50/80 to-orange-50/80 border border-amber-200/90 rounded-2xl">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold shrink-0">
+                        ⏳
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                          <h4 className="text-sm font-black text-slate-900">
+                            Pending Society Membership Applications ({pendingMemberships.length})
+                          </h4>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-100/80 px-2.5 py-0.5 rounded-full self-start">
+                            Awaiting Leadership Review
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 mt-1 font-medium leading-relaxed">
+                          Your membership application has been received. Official student membership cards and verification QR codes are generated and unlocked in your Digital Wallet once approved by the Society President or Faculty Advisor.
+                        </p>
+
+                        <div className="mt-3.5 space-y-2">
+                          {pendingMemberships.map(pm => (
+                            <div key={pm.id} className="p-3 bg-white/90 border border-amber-200/70 rounded-xl flex items-center justify-between text-xs">
+                              <div className="flex items-center gap-2.5">
+                                {pm.society_logo ? (
+                                  <img src={pm.society_logo} alt={pm.society_name} className="w-7 h-7 rounded-lg object-cover border border-amber-100" />
+                                ) : (
+                                  <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-800 font-bold flex items-center justify-center text-[10px]">
+                                    {pm.society_name?.substring(0, 2).toUpperCase() || 'DS'}
+                                  </div>
+                                )}
+                                <div>
+                                  <span className="font-bold text-slate-900 block">{pm.society_name}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono">
+                                    Ref: {pm.membership_id || `REQ-${pm.id}`} • Applied {pm.applied_at ? new Date(pm.applied_at).toLocaleDateString() : 'Recently'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg">
+                                Review in Progress
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* 3. EVENT QR TICKETS & BOARDING PASSES (COMPLETE WITH ALL USER & EVENT DETAILS + DOWNLOAD) */}
@@ -702,7 +894,8 @@ const StudentDashboard = () => {
                 const isPending = status === 'pending';
                 const isVerified = status === 'verified';
                 const isRejected = status === 'rejected';
-                const isExpired = status === 'expired';
+                const isHoldExpired = status === 'expired';
+                const isEventPast = Boolean(reg.is_expired || (reg.event_date && new Date(reg.event_date) < new Date()));
 
                 return (
                   <div 
@@ -714,13 +907,15 @@ const StudentDashboard = () => {
                       <div className="flex items-center justify-between mb-3">
                         <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
                           isAttended ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
+                          (isEventPast && isVerified) ? 'bg-rose-100 text-rose-800 border border-rose-300' :
                           isVerified ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' :
                           isHeld ? 'bg-amber-100 text-amber-900 border border-amber-300' :
                           isPending ? 'bg-sky-100 text-sky-800 border border-sky-200' :
                           isRejected ? 'bg-rose-100 text-rose-800 border border-rose-200' :
                           'bg-slate-100 text-slate-700 border border-slate-200'
                         }`}>
-                          {isAttended ? 'Attended ✓' :
+                          {isAttended ? (isEventPast ? 'Attended ✓ (Concluded)' : 'Attended ✓') :
+                           (isEventPast && isVerified) ? 'Expired (Event Concluded)' :
                            isVerified ? 'Valid Pass' :
                            isHeld ? `Seat Held (${formatTimeRemaining(reg.seconds_remaining, reg.held_until)})` :
                            isPending ? 'Proof Under Review' :
@@ -794,13 +989,24 @@ const StudentDashboard = () => {
                         </div>
                       )}
 
-                      {isExpired && (
+                      {isHoldExpired && (
                         <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1">
                           <p className="text-[11px] font-black text-slate-700 flex items-center gap-1">
                             <Clock size={12} className="text-slate-400" /> Seat Hold Expired
                           </p>
                           <p className="text-[10px] text-slate-500 leading-tight">
                             The 24-hour window elapsed without receipt submission. The seat was returned to general capacity.
+                          </p>
+                        </div>
+                      )}
+
+                      {isEventPast && isVerified && !isAttended && (
+                        <div className="mt-3 p-3 bg-rose-50 border border-rose-200 rounded-2xl space-y-1">
+                          <p className="text-[11px] font-black text-rose-900 flex items-center gap-1">
+                            <AlertCircle size={12} className="text-rose-600" /> Event Concluded — Ticket Inactive
+                          </p>
+                          <p className="text-[10px] text-rose-700 leading-tight">
+                            This event has ended. Entry gate scanning has expired.
                           </p>
                         </div>
                       )}
@@ -815,9 +1021,11 @@ const StudentDashboard = () => {
                       {isVerified ? (
                         <button
                           onClick={() => setSelectedTicket(reg)}
-                          className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-slate-900/10 transition cursor-pointer"
+                          className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md transition cursor-pointer ${
+                            isEventPast ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white shadow-slate-900/10'
+                          }`}
                         >
-                          <QrCode size={13} /> View Digital Ticket
+                          <QrCode size={13} /> {isEventPast ? 'View Concluded Ticket' : 'View Digital Ticket'}
                         </button>
                       ) : isHeld ? (
                         <button
@@ -1076,16 +1284,18 @@ const StudentDashboard = () => {
         <>
           {/* SCREEN VIEW MODAL */}
           <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex flex-col items-center justify-center p-4 overflow-y-auto hide-on-print">
-            <div className="relative animate-in fade-in zoom-in-95 my-8 flex flex-col items-center">
-              <div ref={ticketRef} className="ticket-container bg-transparent p-2">
-                <TicketCard 
-                  selectedTicket={selectedTicket}
-                  type="Student Copy"
-                  userAvatar={userAvatar}
-                  defaultAvatar={defaultAvatar}
-                  displayName={displayName}
-                  profile={profile}
-                />
+            <div className="relative animate-in fade-in zoom-in-95 my-8 flex flex-col items-center max-w-full">
+              <div className="w-full max-w-[95vw] overflow-x-auto pb-2 flex justify-start sm:justify-center">
+                <div ref={ticketRef} className="ticket-container bg-transparent p-2">
+                  <TicketCard 
+                    selectedTicket={selectedTicket}
+                    type="Student Copy"
+                    userAvatar={userAvatar}
+                    defaultAvatar={defaultAvatar}
+                    displayName={displayName}
+                    profile={profile}
+                  />
+                </div>
               </div>
 
               {/* Action Buttons: PNG, JPG, PDF, Print, Close */}
@@ -1106,10 +1316,19 @@ const StudentDashboard = () => {
                 </button>
                 <button
                   onClick={downloadTicketPDF}
-                  className="bg-purple-600 hover:bg-purple-700 text-white py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-purple-600/25 transition cursor-pointer"
+                  disabled={downloadingTicketPDF}
+                  className="bg-purple-600 hover:bg-purple-700 text-white py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-purple-600/25 transition cursor-pointer disabled:opacity-50"
                   title="Export ticket as PDF document"
                 >
-                  <Download size={14} /> Download PDF
+                  {downloadingTicketPDF ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" /> Generating PDF...
+                    </>
+                  ) : (
+                    <>
+                      <Download size={14} /> Download PDF
+                    </>
+                  )}
                 </button>
                 <button
                   onClick={printTicket}
@@ -1130,135 +1349,192 @@ const StudentDashboard = () => {
           
           {/* PRINT VIEW CONTAINER (A4 Landscape, 2 Copies) */}
           <div className="ticket-print-container">
-            <TicketCard 
-                selectedTicket={selectedTicket}
-                type="Student Copy"
-                userAvatar={userAvatar}
-                defaultAvatar={defaultAvatar}
-                displayName={displayName}
-                profile={profile}
-            />
-            <TicketCard 
-                selectedTicket={selectedTicket}
-                type="Department Copy"
-                userAvatar={userAvatar}
-                defaultAvatar={defaultAvatar}
-                displayName={displayName}
-                profile={profile}
-            />
+            <div className="ticket-card-printable">
+              <TicketCard 
+                  selectedTicket={selectedTicket}
+                  type="Student Copy"
+                  userAvatar={userAvatar}
+                  defaultAvatar={defaultAvatar}
+                  displayName={displayName}
+                  profile={profile}
+              />
+            </div>
+            <div className="ticket-card-printable">
+              <TicketCard 
+                  selectedTicket={selectedTicket}
+                  type="Department Copy"
+                  userAvatar={userAvatar}
+                  defaultAvatar={defaultAvatar}
+                  displayName={displayName}
+                  profile={profile}
+              />
+            </div>
           </div>
         </>
       )}
 
       {/* DETAILED DIGITAL SOCIETY MEMBERSHIP CARD MODAL */}
       {selectedMembershipCard && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-700 text-white rounded-3xl max-w-xl w-full p-6 sm:p-8 shadow-2xl relative my-8">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-gradient-to-br from-[#070b14] via-[#0d1527] to-[#05070f] border border-amber-500/40 text-white rounded-[32px] max-w-xl w-full p-6 sm:p-8 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.8),0_0_30px_rgba(245,158,11,0.12)] relative my-8 overflow-hidden">
+            {/* Ambient Background Glow */}
+            <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
+            <div className="absolute bottom-0 left-0 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20"></div>
+
             <button
               onClick={() => setSelectedMembershipCard(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-full bg-slate-800"
+              className="absolute top-5 right-5 text-slate-400 hover:text-white p-2 rounded-full bg-slate-800/80 hover:bg-slate-700 border border-slate-700/60 transition-colors z-20"
             >
               <X size={18} />
             </button>
 
-            <div className="text-center mb-6">
-              <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400 bg-indigo-950/80 border border-indigo-500/30 px-3 py-1 rounded-full inline-block">
-                {selectedMembershipCard.is_cabinet_card 
-                  ? 'Executive Cabinet Credential' 
-                  : 'University Departmental Society Credential'}
-              </span>
-              <h2 className="text-2xl font-black mt-2">{selectedMembershipCard.society_name}</h2>
-              <p className="text-xs text-slate-400 font-mono mt-0.5">
-                MEMBER ID: {selectedMembershipCard.membership_id || `DSMS-MEMBER-${selectedMembershipCard.id}`}
+            <div className="text-center mb-6 relative z-10">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-amber-400/20 via-yellow-400/10 to-amber-400/20 border border-amber-400/40 shadow-[0_0_12px_rgba(251,191,36,0.15)] mb-2">
+                <Sparkles size={11} className="text-amber-300" />
+                <span className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-300">
+                  {selectedMembershipCard.is_cabinet_card 
+                    ? 'Official Executive Cabinet Credential' 
+                    : 'Official University Society Credential'}
+                </span>
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight drop-shadow-sm">{selectedMembershipCard.society_name}</h2>
+              <p className="text-xs text-amber-400 font-mono mt-1 font-bold tracking-wider">
+                ASSIGNED ID: {selectedMembershipCard.membership_id 
+                  || (selectedMembershipCard.is_cabinet_card 
+                      ? `CAB-${selectedMembershipCard.society_name ? selectedMembershipCard.society_name.split(' ').map(w => w[0]).join('').toUpperCase() : 'DSMS'}-${selectedMembershipCard.student_roll_number || profile?.roll_number || '2026'}`
+                      : `DSMS-MEMBER-${selectedMembershipCard.id}`)}
               </p>
             </div>
 
             {/* Authentic ID Card Layout */}
-            <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-6 space-y-5">
-              <div className="flex items-center gap-5">
-                <div className="w-24 h-24 rounded-2xl overflow-hidden border-2 border-indigo-500/50 bg-slate-700 shrink-0">
-                  <img
-                    src={selectedMembershipCard.student_avatar || userAvatar}
-                    alt={selectedMembershipCard.student_name || displayName}
-                    className="w-full h-full object-cover"
-                    onError={(e) => { e.target.src = defaultAvatar; }}
-                  />
+            <div className="bg-slate-900/80 border border-amber-500/25 rounded-2xl p-6 space-y-5 relative z-10 shadow-inner">
+              <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
+                {/* Photo Frame */}
+                <div className="relative shrink-0">
+                  <div className="p-1 rounded-2xl bg-gradient-to-b from-amber-300 via-amber-500 to-amber-700 shadow-xl">
+                    <div className="w-28 sm:w-32 h-34 sm:h-38 rounded-[14px] overflow-hidden bg-slate-950 border border-black/50">
+                      <MediaImage
+                        src={selectedMembershipCard.student_avatar || userAvatar}
+                        alt={selectedMembershipCard.student_name || displayName}
+                        className="w-full h-full object-cover"
+                        onError={(e) => { e.target.src = defaultAvatar; }}
+                      />
+                    </div>
+                  </div>
+                  <div className="absolute -bottom-1 -right-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-amber-600 text-slate-950 font-black text-[8px] uppercase tracking-wider shadow-md border-2 border-slate-950 flex items-center gap-0.5">
+                    <ShieldCheck size={10} strokeWidth={3} />
+                    <span>OFFICIAL</span>
+                  </div>
                 </div>
 
-                <div className="space-y-1 min-w-0">
-                  <h3 className="text-xl font-black text-white truncate">
-                    {selectedMembershipCard.student_name || displayName}
-                  </h3>
-                  <p className="text-sm font-bold text-indigo-400">
-                    {selectedMembershipCard.role_title || 'General Member'}
+                <div className="space-y-1.5 min-w-0 flex-1 text-center sm:text-left">
+                  <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap">
+                    <h3 className="text-xl sm:text-2xl font-black text-white truncate drop-shadow-sm">
+                      {selectedMembershipCard.student_name || displayName}
+                    </h3>
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider bg-emerald-950/90 text-emerald-300 border border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.25)]">
+                      <span className="relative flex h-1.5 w-1.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400"></span>
+                      </span>
+                      ACTIVE
+                    </span>
+                  </div>
+
+                  <p className="text-sm font-black tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-sky-300 via-indigo-200 to-amber-300">
+                    {selectedMembershipCard.role_title || (selectedMembershipCard.is_cabinet_card ? 'Cabinet Member' : 'General Member')}
                   </p>
-                  <p className="text-xs font-mono text-slate-300">
-                    Roll Number: {selectedMembershipCard.student_roll_number || profile?.roll_number || 'FA22-BCS-042'}
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    {selectedMembershipCard.student_program || profile?.program || 'BS Computer Science'} • {selectedMembershipCard.student_department || profile?.department || 'Department of Computer Science'}
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    {selectedMembershipCard.student_faculty || profile?.faculty_name || 'Faculty of Computing & Information Technology'}
-                  </p>
+
+                  <div className="pt-1 space-y-1 text-xs">
+                    <div className="inline-block px-2.5 py-0.5 rounded-md bg-amber-400/10 border border-amber-400/30">
+                      <span className="font-mono text-amber-200/90 font-bold text-xs tracking-wide">
+                        Roll Number: {selectedMembershipCard.student_roll_number || profile?.roll_number || 'FA22-BCS-042'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-200 font-bold">
+                      {selectedMembershipCard.student_program || profile?.program || 'BS Computer Science'} • {selectedMembershipCard.student_department || profile?.department || 'Department of Computer Science'}
+                    </p>
+                    <p className="text-[11px] text-slate-400 uppercase font-black tracking-wider">
+                      {selectedMembershipCard.student_faculty || profile?.faculty_name || 'Faculty of Computing & Information Technology'}
+                    </p>
+                  </div>
                 </div>
               </div>
 
               {/* Statutory Endorsements */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-slate-700 text-xs">
-                <div className="p-3 bg-slate-900/60 rounded-xl">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block">Issued By (Club President)</span>
-                  <span className="font-bold text-white block mt-0.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-amber-500/20 text-xs">
+                <div className="p-3 bg-slate-950/70 border border-white/5 rounded-xl">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-amber-400/80 block">Issued By (Club President)</span>
+                  <span className="font-bold text-white block mt-0.5 text-xs truncate">
                     {selectedMembershipCard.issued_by_name || `${selectedMembershipCard.society_president || 'Muhammad Roshan Ashraf'} (President)`}
                   </span>
+                  <span className="text-[9px] font-mono text-slate-400 flex items-center gap-1 mt-0.5">
+                    <CheckCircle size={10} className="text-emerald-400 shrink-0" /> Digitally Endorsed
+                  </span>
                 </div>
 
-                <div className="p-3 bg-slate-900/60 rounded-xl">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block">Approved By (Faculty Advisor)</span>
-                  <span className="font-bold text-white block mt-0.5">
+                <div className="p-3 bg-slate-950/70 border border-white/5 rounded-xl">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-amber-400/80 block">Approved By (Faculty Advisor)</span>
+                  <span className="font-bold text-white block mt-0.5 text-xs truncate">
                     {selectedMembershipCard.approved_by_advisor || `${selectedMembershipCard.society_advisor || 'Dr. Sarah Ahmed'} (Faculty Advisor)`}
                   </span>
-                </div>
-
-                <div className="p-3 bg-slate-900/60 rounded-xl">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block">Super Admin Endorsement</span>
-                  <span className="font-bold text-emerald-400 flex items-center gap-1 mt-0.5">
-                    <CheckCircle size={14} /> Directorate of Student Affairs Verified
+                  <span className="text-[9px] font-mono text-slate-400 flex items-center gap-1 mt-0.5">
+                    <ShieldCheck size={10} className="text-amber-400 shrink-0" /> Faculty Supervised
                   </span>
                 </div>
 
-                <div className="p-3 bg-slate-900/60 rounded-xl">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block">Term Validity</span>
-                  <span className="font-bold text-slate-200 block mt-0.5 font-mono">
+                <div className="p-3 bg-slate-950/70 border border-white/5 rounded-xl">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-amber-400/80 block">Super Admin Endorsement</span>
+                  <span className="font-bold text-emerald-400 flex items-center gap-1 mt-0.5 text-xs">
+                    <BadgeCheck size={14} className="text-emerald-400 shrink-0" /> Directorate of Student Affairs Verified
+                  </span>
+                </div>
+
+                <div className="p-3 bg-slate-950/70 border border-white/5 rounded-xl">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-amber-400/80 block">Term Validity</span>
+                  <span className="font-bold text-slate-200 block mt-0.5 font-mono text-xs">
                     {selectedMembershipCard.valid_until || 'Academic Session 2026-2027'}
                   </span>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-2">
-                <div className="p-2 bg-white rounded-xl inline-block">
-                  <QRCode value={`${window.location.origin}/verify/member/${selectedMembershipCard.card_qr_code || selectedMembershipCard.id}`} size={72} />
+              {/* Security QR Scanner Box */}
+              <div className="flex items-center justify-between pt-3 border-t border-amber-500/20">
+                <div className="p-3 bg-white rounded-2xl shadow-2xl border-2 border-amber-400/40 relative shrink-0">
+                  <QRCode 
+                    value={`${window.location.origin}/verify/member/${selectedMembershipCard.card_qr_code || selectedMembershipCard.membership_id || selectedMembershipCard.id}`} 
+                    size={88} 
+                    level="M"
+                  />
+                  <div className="flex items-center justify-center gap-1 mt-1 text-[7.5px] font-black uppercase tracking-wider text-slate-900">
+                    <ShieldCheck size={10} className="text-emerald-600 shrink-0" />
+                    <span>SCAN TO VERIFY</span>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <span className="text-[10px] font-mono text-slate-400 block">SCAN TO VERIFY (PUBLIC)</span>
-                  <span className="text-xs font-mono text-indigo-300 font-bold">
-                    {String(selectedMembershipCard.card_qr_code || selectedMembershipCard.id).substring(0, 16)}...
+                <div className="text-right pl-4">
+                  <span className="text-[9px] font-mono font-black tracking-widest text-amber-400/90 block uppercase">
+                    SCAN TO VERIFY (PUBLIC)
                   </span>
-                  <span className="text-[10px] text-slate-500 block mt-1">Open in any phone camera</span>
+                  <span className="text-xs font-mono text-slate-200 font-bold block mt-0.5">
+                    {String(selectedMembershipCard.card_qr_code || selectedMembershipCard.membership_id || selectedMembershipCard.id).substring(0, 20)}...
+                  </span>
+                  <span className="text-[10px] text-slate-400 block mt-1">
+                    Instant verification with smartphone camera
+                  </span>
                 </div>
               </div>
             </div>
 
-            <div className="mt-6 flex items-center justify-end gap-3">
+            <div className="mt-6 flex items-center justify-end gap-3 relative z-10">
               <button
                 onClick={() => window.print()}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                className="px-5 py-2.5 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-slate-950 hover:from-amber-300 hover:to-amber-500 rounded-xl font-black text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 transition cursor-pointer"
               >
                 <Printer size={15} /> Print / Save Card
               </button>
               <button
                 onClick={() => setSelectedMembershipCard(null)}
-                className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold text-xs transition cursor-pointer"
+                className="px-5 py-2.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-xl font-bold text-xs transition cursor-pointer border border-slate-700/60"
               >
                 Close
               </button>
@@ -1483,7 +1759,7 @@ const StudentDashboard = () => {
                   hint="Select photo from device storage, phone gallery, or camera"
                   shape="avatar"
                   value={editForm.avatar_url}
-                  onChange={(url) => setEditForm({...editForm, avatar_url: url})}
+                  onChange={(url) => setEditForm(prev => ({ ...prev, avatar_url: url }))}
                 />
               </div>
 
@@ -1682,14 +1958,14 @@ const StudentDashboard = () => {
                   )}
                   {selectedHoldReg.receipt_file && (
                     <div className="pt-2">
-                      <a
+                      <MediaLink
                         href={getMediaUrl(selectedHoldReg.receipt_file)}
                         target="_blank"
                         rel="noreferrer"
                         className="text-indigo-600 underline font-bold inline-flex items-center gap-1"
                       >
                         <ExternalLink size={12} /> View Uploaded Receipt File
-                      </a>
+                      </MediaLink>
                     </div>
                   )}
                 </div>

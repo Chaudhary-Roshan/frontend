@@ -1,3 +1,4 @@
+import { MediaImage } from '../components/common/AuthenticatedMedia';
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { 
@@ -420,7 +421,7 @@ const CertificateVerify = () => {
               <div className="p-4 bg-white rounded-2xl border border-emerald-200 shadow-sm flex items-center gap-4">
                 <div className="w-14 h-14 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center shrink-0 overflow-hidden shadow-xs">
                   {result.society_logo ? (
-                    <img 
+                    <MediaImage 
                       src={getMediaUrl(result.society_logo)} 
                       alt={result.society_name} 
                       className="w-full h-full object-cover"
@@ -441,7 +442,7 @@ const CertificateVerify = () => {
               <div className="p-5 bg-gradient-to-br from-indigo-900 to-slate-900 text-white rounded-3xl shadow-md space-y-4">
                 <div className="flex items-center gap-4">
                   <div className="w-20 h-20 rounded-2xl overflow-hidden border-2 border-indigo-400 bg-slate-800 shrink-0">
-                    <img
+                    <MediaImage
                       src={result.avatar_url ? getMediaUrl(result.avatar_url) : defaultAvatar}
                       alt={result.student_name}
                       className="w-full h-full object-cover"
@@ -545,7 +546,7 @@ const CertificateVerify = () => {
               <div className="p-4 bg-white rounded-2xl border border-emerald-200 shadow-sm flex items-center gap-4">
                 <div className="w-14 h-14 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center shrink-0 overflow-hidden shadow-xs">
                   {result.society_logo ? (
-                    <img 
+                    <MediaImage 
                       src={getMediaUrl(result.society_logo)} 
                       alt={result.society_name} 
                       className="w-full h-full object-cover"
@@ -575,7 +576,7 @@ const CertificateVerify = () => {
               <div className="bg-white p-5 rounded-2xl border border-emerald-200 shadow-xs space-y-4">
                 <div className="flex items-center gap-4">
                   <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-indigo-200 bg-slate-100 shrink-0">
-                    <img
+                    <MediaImage
                       src={result.avatar_url ? getMediaUrl(result.avatar_url) : defaultAvatar}
                       alt={result.student_name}
                       className="w-full h-full object-cover"
@@ -684,7 +685,7 @@ const CertificateVerify = () => {
                   <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Certifying Society</span>
                   <p className="text-sm font-black text-slate-900 flex items-center gap-1.5">
                     {result.society_logo && (
-                      <img src={getMediaUrl(result.society_logo)} alt="" className="w-4 h-4 rounded-full object-cover" />
+                      <MediaImage src={getMediaUrl(result.society_logo)} alt="" className="w-4 h-4 rounded-full object-cover" />
                     )}
                     <Building size={14} className="text-indigo-600 shrink-0" /> {result.society_name}
                   </p>
