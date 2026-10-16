@@ -722,7 +722,12 @@ const PresidentDashboard = () => {
     setIsLookingUpVolunteer(true);
     try {
       const res = await api.get(`users/search_students/?q=${encodeURIComponent(query.trim())}`);
-      setVolunteerSearchResults(res.data || []);
+      const results = res.data || [];
+      setVolunteerSearchResults(results);
+      const exact = results.find(s => s.roll_number && s.roll_number.toLowerCase() === query.trim().toLowerCase());
+      if (exact) {
+        setSelectedVolunteerStudent(exact);
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -4470,8 +4475,21 @@ const PresidentDashboard = () => {
                 <select
                   required
                   value={volunteerForm.event_id}
-                  onChange={e => setVolunteerForm({ ...volunteerForm, event_id: e.target.value })}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
+                  onChange={e => {
+                    const evId = e.target.value;
+                    const foundEv = societyEvents.find(ev => String(ev.id) === String(evId));
+                    let dStart = volunteerForm.duty_start;
+                    let dEnd = volunteerForm.duty_end;
+                    if (foundEv && foundEv.date) {
+                      try {
+                        const evDate = new Date(foundEv.date);
+                        dStart = new Date(evDate.getTime() - (evDate.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+                        dEnd = new Date(evDate.getTime() + (3 * 3600000) - (evDate.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+                      } catch {}
+                    }
+                    setVolunteerForm({ ...volunteerForm, event_id: evId, duty_start: dStart, duty_end: dEnd });
+                  }}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white outline-none focus:border-orange-400 transition"
                 >
                   <option value="">Select Scheduled Event...</option>
                   {societyEvents.map(ev => (
@@ -4483,78 +4501,162 @@ const PresidentDashboard = () => {
               {/* Student Roll Lookup */}
               <div className="space-y-2">
                 <label className="block text-xs font-bold uppercase text-slate-700">
-                  Select Student Volunteer <span className="text-rose-500">*</span>
+                  Search Student by Roll Number <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Search by Roll Number or Name..."
-                    value={volunteerRollInput}
-                    onChange={e => handleSearchVolunteers(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
-                  />
+                  <div className="relative flex items-center">
+                    <Search className="absolute left-3.5 text-slate-400 pointer-events-none" size={16} />
+                    <input
+                      type="text"
+                      placeholder="Enter Roll Number (e.g. F23BINCE1M04114)..."
+                      value={volunteerRollInput}
+                      onChange={e => handleSearchVolunteers(e.target.value)}
+                      className="w-full pl-10 pr-9 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white outline-none focus:border-orange-400 transition"
+                    />
+                    {isLookingUpVolunteer && (
+                      <div className="absolute right-3">
+                        <RefreshCw size={14} className="animate-spin text-orange-500" />
+                      </div>
+                    )}
+                  </div>
+
                   {volunteerSearchResults.length > 0 && (
-                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-20 max-h-48 overflow-y-auto divide-y divide-slate-100">
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl z-30 max-h-52 overflow-y-auto divide-y divide-slate-100">
                       {volunteerSearchResults.map(s => (
                         <div
                           key={s.id || s.username}
                           onClick={() => handleSelectVolunteer(s)}
-                          className="p-2.5 hover:bg-orange-50 cursor-pointer flex items-center justify-between text-xs"
+                          className="p-3 hover:bg-orange-50 cursor-pointer flex items-center justify-between text-xs transition"
                         >
                           <div>
                             <span className="font-bold text-slate-900 block">{s.full_name || s.username}</span>
-                            <span className="text-[11px] font-mono text-slate-400">{s.roll_number || s.username} • {s.department || 'Student'}</span>
+                            <span className="text-[11px] font-mono text-slate-500 font-bold">
+                              Roll: {s.roll_number || s.username}
+                            </span>
+                            {(s.department || s.program) && (
+                              <span className="text-[10px] text-slate-400 block mt-0.5">
+                                {[s.department, s.program].filter(Boolean).join(' • ')}
+                              </span>
+                            )}
                           </div>
-                          <span className="text-[10px] font-bold text-orange-600 bg-orange-100 px-2 py-0.5 rounded-lg">Select</span>
+                          <span className="text-[11px] font-bold text-orange-600 bg-orange-50 border border-orange-200 px-2.5 py-1 rounded-lg shrink-0">
+                            Select
+                          </span>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
 
-                {selectedVolunteerStudent && (
-                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between">
-                    <div>
-                      <span className="text-xs font-bold text-emerald-900 block">{selectedVolunteerStudent.full_name || selectedVolunteerStudent.username}</span>
-                      <span className="text-[11px] font-mono text-emerald-700">Roll: {selectedVolunteerStudent.roll_number || selectedVolunteerStudent.username}</span>
+                {/* Selected Student Information Card */}
+                {selectedVolunteerStudent ? (
+                  <div className="p-3.5 bg-orange-50/70 border border-orange-200 rounded-2xl flex items-start justify-between gap-3 animate-in fade-in">
+                    <div className="flex items-center gap-3">
+                      <div className="w-11 h-11 rounded-xl bg-orange-600 text-white font-black text-sm flex items-center justify-center shrink-0 shadow-sm">
+                        {(selectedVolunteerStudent.full_name || selectedVolunteerStudent.username || 'V')[0].toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-xs font-black text-slate-900">
+                            {selectedVolunteerStudent.full_name || selectedVolunteerStudent.username}
+                          </h4>
+                          <span className="text-[9px] font-black uppercase text-emerald-700 bg-emerald-100/80 px-1.5 py-0.5 rounded">
+                            Verified
+                          </span>
+                        </div>
+                        <div className="text-[11px] font-mono font-bold text-orange-700 mt-0.5">
+                          Roll: {selectedVolunteerStudent.roll_number || selectedVolunteerStudent.username}
+                        </div>
+                        {(selectedVolunteerStudent.department || selectedVolunteerStudent.program) && (
+                          <div className="text-[10px] text-slate-600 mt-0.5">
+                            {[selectedVolunteerStudent.department, selectedVolunteerStudent.program].filter(Boolean).join(' • ')}
+                          </div>
+                        )}
+                        {selectedVolunteerStudent.email && (
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            {selectedVolunteerStudent.email}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">Selected</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedVolunteerStudent(null);
+                        setVolunteerRollInput('');
+                      }}
+                      className="text-[11px] font-bold text-slate-500 hover:text-rose-600 p-1 hover:bg-white rounded-lg transition cursor-pointer shrink-0"
+                    >
+                      Change
+                    </button>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-center">
+                    <p className="text-[11px] text-slate-500">
+                      Enter roll number above to display verified student profile.
+                    </p>
                   </div>
                 )}
               </div>
 
+              {/* Check-In Gate / Location */}
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                  Gate / Desk Name <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Main Gate - Desk 1"
+                  value={volunteerForm.gate_name}
+                  onChange={e => setVolunteerForm({ ...volunteerForm, gate_name: e.target.value })}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white outline-none focus:border-orange-400 transition"
+                />
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {['Main Gate - Desk 1', 'Gate 2 - Student Center', 'VIP / Speaker Desk', 'Desk Alpha'].map(preset => (
+                    <button
+                      type="button"
+                      key={preset}
+                      onClick={() => setVolunteerForm({ ...volunteerForm, gate_name: preset })}
+                      className="text-[10px] font-bold px-2.5 py-1 bg-slate-100 hover:bg-orange-50 hover:text-orange-700 text-slate-600 rounded-lg cursor-pointer transition border border-transparent hover:border-orange-200"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Duty Start & Duty End Date-Times */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
-                    Gate / Desk Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Main Auditorium - Gate 1"
-                    value={volunteerForm.gate_name}
-                    onChange={e => setVolunteerForm({ ...volunteerForm, gate_name: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
-                    Duty Start Window
+                    Duty Start Date & Time
                   </label>
                   <input
                     type="datetime-local"
                     value={volunteerForm.duty_start}
                     onChange={e => setVolunteerForm({ ...volunteerForm, duty_start: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white outline-none focus:border-orange-400 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                    Duty End Date & Time
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={volunteerForm.duty_end}
+                    onChange={e => setVolunteerForm({ ...volunteerForm, duty_end: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white outline-none focus:border-orange-400 transition"
                   />
                 </div>
               </div>
 
-              <div className="pt-3 flex justify-end gap-3">
+              <div className="pt-3 flex justify-end gap-3 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setShowAssignVolunteerModal(false)}
-                  className="px-4 py-2.5 text-slate-600 text-xs font-bold rounded-xl hover:bg-slate-100 cursor-pointer"
+                  className="px-4 py-2.5 text-slate-600 text-xs font-bold rounded-xl hover:bg-slate-100 cursor-pointer transition"
                 >
                   Cancel
                 </button>
@@ -4563,7 +4665,7 @@ const PresidentDashboard = () => {
                   disabled={!selectedVolunteerStudent || !volunteerForm.event_id}
                   className="px-5 py-2.5 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-md shadow-orange-600/30 transition cursor-pointer"
                 >
-                  Confirm Assignment
+                  Confirm Appointment
                 </button>
               </div>
             </form>

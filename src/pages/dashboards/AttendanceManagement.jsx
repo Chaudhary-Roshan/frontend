@@ -31,9 +31,13 @@ const AttendanceManagement = () => {
   const [volunteers, setVolunteers] = useState([]);
   const [loadingVolunteers, setLoadingVolunteers] = useState(false);
   const [showVolunteerModal, setShowVolunteerModal] = useState(false);
-  const [studentUsers, setStudentUsers] = useState([]);
-  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [selectedVolunteerStudent, setSelectedVolunteerStudent] = useState(null);
+  const [volunteerRollInput, setVolunteerRollInput] = useState('');
+  const [volunteerSearchResults, setVolunteerSearchResults] = useState([]);
+  const [isSearchingVolunteer, setIsSearchingVolunteer] = useState(false);
   const [volunteerGateName, setVolunteerGateName] = useState('Gate 1 - Main Entrance');
+  const [dutyStart, setDutyStart] = useState('');
+  const [dutyEnd, setDutyEnd] = useState('');
   const [appointingVolunteer, setAppointingVolunteer] = useState(false);
 
   // Camera Scanner State
@@ -126,20 +130,55 @@ const AttendanceManagement = () => {
     }
   };
 
-  const openAppointModal = async () => {
+  const openAppointModal = () => {
     setShowVolunteerModal(true);
+    setSelectedVolunteerStudent(null);
+    setVolunteerRollInput('');
+    setVolunteerSearchResults([]);
+    setVolunteerGateName('Gate 1 - Main Entrance');
+    if (selectedEvent && selectedEvent.date) {
+      try {
+        const evDate = new Date(selectedEvent.date);
+        const startLocal = new Date(evDate.getTime() - (evDate.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+        setDutyStart(startLocal);
+        const endLocal = new Date(evDate.getTime() + (3 * 3600000) - (evDate.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+        setDutyEnd(endLocal);
+      } catch {
+        setDutyStart('');
+        setDutyEnd('');
+      }
+    } else {
+      setDutyStart('');
+      setDutyEnd('');
+    }
+  };
+
+  const handleSearchVolunteers = async (query) => {
+    setVolunteerRollInput(query);
+    if (!query || query.trim().length < 1) {
+      setVolunteerSearchResults([]);
+      return;
+    }
+    setIsSearchingVolunteer(true);
     try {
-      const res = await api.get('users/');
-      const students = Array.isArray(res.data)
-        ? res.data.filter(u => u.role === 'student')
-        : [];
-      setStudentUsers(students);
-      if (students.length > 0 && !selectedStudentId) {
-        setSelectedStudentId(students[0].id.toString());
+      const res = await api.get(`users/search_students/?q=${encodeURIComponent(query.trim())}`);
+      const results = res.data || [];
+      setVolunteerSearchResults(results);
+      const exact = results.find(s => s.roll_number && s.roll_number.toLowerCase() === query.trim().toLowerCase());
+      if (exact) {
+        setSelectedVolunteerStudent(exact);
       }
     } catch (err) {
-      console.error('Failed to fetch students', err);
+      console.error(err);
+    } finally {
+      setIsSearchingVolunteer(false);
     }
+  };
+
+  const handleSelectVolunteer = (student) => {
+    setSelectedVolunteerStudent(student);
+    setVolunteerRollInput(student.roll_number || student.username);
+    setVolunteerSearchResults([]);
   };
 
   const handleAppointVolunteer = async (e) => {
@@ -148,16 +187,25 @@ const AttendanceManagement = () => {
       alert("Cannot assign gate volunteers to an event that has already concluded.");
       return;
     }
-    if (!selectedStudentId || !selectedEventId) return;
+    if (!selectedVolunteerStudent || !selectedEventId) {
+      alert("Please search by roll number and select a student volunteer.");
+      return;
+    }
     setAppointingVolunteer(true);
     try {
       await api.post('staff-assignments/', {
         event: parseInt(selectedEventId),
-        volunteer: parseInt(selectedStudentId),
-        gate_name: volunteerGateName.trim() || 'Gate 1',
+        volunteer: selectedVolunteerStudent.id,
+        gate_name: volunteerGateName.trim() || 'Gate 1 - Main Entrance',
+        duty_start: dutyStart ? new Date(dutyStart).toISOString() : null,
+        duty_end: dutyEnd ? new Date(dutyEnd).toISOString() : null,
         status: 'assigned'
       });
       setShowVolunteerModal(false);
+      setSelectedVolunteerStudent(null);
+      setVolunteerRollInput('');
+      setDutyStart('');
+      setDutyEnd('');
       fetchVolunteers(selectedEventId);
     } catch (err) {
       alert(err.response?.data?.error || err.response?.data?.detail || 'Failed to appoint volunteer.');
@@ -1092,57 +1140,142 @@ const AttendanceManagement = () => {
 
       {/* APPOINT GATE VOLUNTEER MODAL */}
       {showVolunteerModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-slate-200 space-y-5 animate-in zoom-in-95">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-200 space-y-5 animate-in zoom-in-95 my-8">
             <div className="flex items-start justify-between">
               <div>
                 <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200">
                   Multi-Operator Gate Pass
                 </span>
                 <h3 className="text-xl font-black text-slate-900 mt-1">Appoint Gate Officer</h3>
-                <p className="text-xs text-slate-500 font-medium">Grant a student scanner permissions for this event.</p>
+                <p className="text-xs text-slate-500 font-medium">
+                  {selectedEvent ? `Authorizing check-in scanner permissions for "${selectedEvent.title}"` : 'Grant a student scanner permissions for this event.'}
+                </p>
               </div>
               <button
+                type="button"
                 onClick={() => setShowVolunteerModal(false)}
                 className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
               >
-                <XCircle size={20} />
+                <XCircle size={22} />
               </button>
             </div>
 
             <form onSubmit={handleAppointVolunteer} className="space-y-4">
-              <div>
-                <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 mb-1">
-                  Select Student:
+              {/* Student Roll Number Search */}
+              <div className="space-y-2">
+                <label className="block text-xs font-bold uppercase text-slate-700">
+                  Search Student by Roll Number <span className="text-rose-500">*</span>
                 </label>
-                {studentUsers.length === 0 ? (
-                  <div className="p-3 bg-slate-50 rounded-xl text-xs text-slate-500">Loading student directory...</div>
+                <div className="relative">
+                  <div className="relative flex items-center">
+                    <Search className="absolute left-3.5 text-slate-400 pointer-events-none" size={16} />
+                    <input
+                      type="text"
+                      placeholder="Enter Roll Number (e.g. F23BINCE1M04114)..."
+                      value={volunteerRollInput}
+                      onChange={e => handleSearchVolunteers(e.target.value)}
+                      className="w-full pl-10 pr-9 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white outline-none focus:border-indigo-400 transition"
+                      autoFocus
+                    />
+                    {isSearchingVolunteer && (
+                      <div className="absolute right-3">
+                        <RefreshCw size={14} className="animate-spin text-indigo-500" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Dropdown search results */}
+                  {volunteerSearchResults.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl z-30 max-h-52 overflow-y-auto divide-y divide-slate-100">
+                      {volunteerSearchResults.map(s => (
+                        <div
+                          key={s.id || s.username}
+                          onClick={() => handleSelectVolunteer(s)}
+                          className="p-3 hover:bg-indigo-50 cursor-pointer flex items-center justify-between text-xs transition"
+                        >
+                          <div>
+                            <span className="font-bold text-slate-900 block">{s.full_name || s.username}</span>
+                            <span className="text-[11px] font-mono text-slate-500 font-bold">
+                              Roll: {s.roll_number || s.username}
+                            </span>
+                            {(s.department || s.program) && (
+                              <span className="text-[10px] text-slate-400 block mt-0.5">
+                                {[s.department, s.program].filter(Boolean).join(' • ')}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg shrink-0">
+                            Select
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Selected Student Information Card */}
+                {selectedVolunteerStudent ? (
+                  <div className="p-3.5 bg-indigo-50/70 border border-indigo-200 rounded-2xl flex items-start justify-between gap-3 animate-in fade-in">
+                    <div className="flex items-center gap-3">
+                      <div className="w-11 h-11 rounded-xl bg-indigo-600 text-white font-black text-sm flex items-center justify-center shrink-0 shadow-sm">
+                        {(selectedVolunteerStudent.full_name || selectedVolunteerStudent.username || 'S')[0].toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-xs font-black text-slate-900">
+                            {selectedVolunteerStudent.full_name || selectedVolunteerStudent.username}
+                          </h4>
+                          <span className="text-[9px] font-black uppercase text-emerald-700 bg-emerald-100/80 px-1.5 py-0.5 rounded">
+                            Verified
+                          </span>
+                        </div>
+                        <div className="text-[11px] font-mono font-bold text-indigo-700 mt-0.5">
+                          Roll: {selectedVolunteerStudent.roll_number || selectedVolunteerStudent.username}
+                        </div>
+                        {(selectedVolunteerStudent.department || selectedVolunteerStudent.program) && (
+                          <div className="text-[10px] text-slate-600 mt-0.5">
+                            {[selectedVolunteerStudent.department, selectedVolunteerStudent.program].filter(Boolean).join(' • ')}
+                          </div>
+                        )}
+                        {selectedVolunteerStudent.email && (
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            {selectedVolunteerStudent.email}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedVolunteerStudent(null);
+                        setVolunteerRollInput('');
+                      }}
+                      className="text-[11px] font-bold text-slate-500 hover:text-rose-600 p-1 hover:bg-white rounded-lg transition cursor-pointer shrink-0"
+                    >
+                      Change
+                    </button>
+                  </div>
                 ) : (
-                  <select
-                    value={selectedStudentId}
-                    onChange={(e) => setSelectedStudentId(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white outline-none"
-                    required
-                  >
-                    {studentUsers.map(s => (
-                      <option key={s.id} value={s.id}>
-                        {s.first_name || s.last_name ? `${s.first_name} ${s.last_name}` : s.username} ({s.roll_number ? `Roll: ${s.roll_number}` : `@${s.username}`})
-                      </option>
-                    ))}
-                  </select>
+                  <div className="p-3 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-center">
+                    <p className="text-[11px] text-slate-500">
+                      Enter roll number above to display verified student profile.
+                    </p>
+                  </div>
                 )}
               </div>
 
+              {/* Check-In Gate / Location */}
               <div>
-                <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 mb-1">
-                  Check-In Gate / Location:
+                <label className="block text-[11px] font-black uppercase tracking-wider text-slate-600 mb-1">
+                  Check-In Gate / Location <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
                   value={volunteerGateName}
                   onChange={(e) => setVolunteerGateName(e.target.value)}
-                  placeholder="e.g. Gate 1 (Main Entrance)"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white outline-none"
+                  placeholder="e.g. Gate 1 - Main Entrance"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white outline-none focus:border-indigo-400 transition"
                   required
                 />
                 <div className="flex flex-wrap gap-1.5 mt-2">
@@ -1151,7 +1284,7 @@ const AttendanceManagement = () => {
                       type="button"
                       key={preset}
                       onClick={() => setVolunteerGateName(preset)}
-                      className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md cursor-pointer transition"
+                      className="text-[10px] font-bold px-2.5 py-1 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 rounded-lg cursor-pointer transition border border-transparent hover:border-indigo-200"
                     >
                       {preset}
                     </button>
@@ -1159,20 +1292,53 @@ const AttendanceManagement = () => {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              {/* Date & Time: Duty Start to Duty End */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-600 mb-1">
+                    Duty Start Date & Time
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={dutyStart}
+                    onChange={(e) => setDutyStart(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white outline-none focus:border-indigo-400 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-600 mb-1">
+                    Duty End Date & Time
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={dutyEnd}
+                    onChange={(e) => setDutyEnd(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white outline-none focus:border-indigo-400 transition"
+                  />
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setShowVolunteerModal(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={appointingVolunteer || !selectedStudentId}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-600/20 cursor-pointer"
+                  disabled={appointingVolunteer || !selectedVolunteerStudent}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-600/20 cursor-pointer transition flex items-center gap-1.5"
                 >
-                  {appointingVolunteer ? 'Appointing...' : 'Confirm Appointment'}
+                  {appointingVolunteer ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" /> Appointing...
+                    </>
+                  ) : (
+                    'Confirm Appointment'
+                  )}
                 </button>
               </div>
             </form>
