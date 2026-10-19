@@ -25,7 +25,9 @@ const PortalSectionNav = ({ sections = [], className = '' }) => {
         const topEntry = visibleEntries.reduce((prev, curr) => {
           return curr.boundingClientRect.top < prev.boundingClientRect.top ? curr : prev;
         });
-        setActiveId(topEntry.target.id);
+        if (topEntry && topEntry.target && topEntry.target.id) {
+          setActiveId(topEntry.target.id);
+        }
       }
     };
 

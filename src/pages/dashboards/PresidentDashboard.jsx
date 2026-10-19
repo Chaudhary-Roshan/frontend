@@ -1331,14 +1331,14 @@ const PresidentDashboard = () => {
       id: 'gate-volunteers',
       label: 'Gate & Volunteers',
       icon: QrCode,
-      badge: `${societyGateOfficers.length + eventVolunteers.length}`,
+      badge: `${staffAssignments.length + volunteerHours.length} Staff`,
       badgeColor: 'amber'
     },
     {
       id: 'certificates',
       label: 'Certificates Studio',
       icon: Award,
-      badge: `${societyTemplates.length} Templates`,
+      badge: `${certificateTemplates.length} Templates`,
       badgeColor: 'blue'
     }
   ];
