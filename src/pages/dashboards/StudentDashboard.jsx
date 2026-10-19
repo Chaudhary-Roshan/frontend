@@ -19,7 +19,6 @@ import CertificateModal from '../../components/modals/CertificateModal';
 import CompleteProfileModal from '../../components/modals/CompleteProfileModal';
 import ImageUploader from '../../components/common/ImageUploader';
 import StudentDigitalWallet from '../../components/membership/StudentDigitalWallet';
-import PortalSectionNav from '../../components/common/PortalSectionNav';
 import { getMediaUrl, handleImageError } from '../../utils/media';
 import { 
   FACULTIES, 
@@ -653,58 +652,6 @@ const StudentDashboard = () => {
     !profile.program || !profile.phone_number || !profile.cnic
   );
 
-  const studentSections = [
-    {
-      id: 'profile',
-      label: 'Student Profile',
-      icon: User,
-      badge: user?.roll_number || 'Verified',
-      badgeColor: 'indigo'
-    },
-    ...(assignedDuties && assignedDuties.length > 0 ? [{
-      id: 'volunteer-duty',
-      label: 'Gate Duty',
-      icon: QrCode,
-      badge: `${assignedDuties.length} Active`,
-      badgeColor: 'rose'
-    }] : []),
-    {
-      id: 'memberships',
-      label: 'Digital Wallet',
-      icon: ShieldCheck,
-      badge: `${memberships.length} Societies`,
-      badgeColor: 'violet'
-    },
-    {
-      id: 'tickets',
-      label: 'Event Passes',
-      icon: Ticket,
-      badge: `${registrations.length} Passes`,
-      badgeColor: 'blue'
-    },
-    {
-      id: 'recruitments',
-      label: 'Recruitments',
-      icon: Clock,
-      badge: `${applications.length} Applied`,
-      badgeColor: 'amber'
-    },
-    {
-      id: 'certificates',
-      label: 'Certificates',
-      icon: Award,
-      badge: `${certificates.length} Issued`,
-      badgeColor: 'emerald'
-    },
-    {
-      id: 'volunteer-hours',
-      label: 'Volunteer Service',
-      icon: Clock,
-      badge: `${totalVolHours.toFixed(1)} hrs`,
-      badgeColor: 'emerald'
-    }
-  ];
-
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
@@ -751,7 +698,7 @@ const StudentDashboard = () => {
         )}
 
         {/* 1. STUDENT PROFILE HEADER CARD */}
-        <div id="profile" className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-sm relative overflow-hidden scroll-mt-28">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-sm relative overflow-hidden">
           <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-50/60 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
 
           <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -886,12 +833,9 @@ const StudentDashboard = () => {
           })}
         </div>
 
-        {/* STICKY QUICK-NAVIGATION JUMP BAR */}
-        <PortalSectionNav sections={studentSections} />
-
         {/* ASSIGNED DUTIES (EVENT CHECK-IN VOLUNTEER PASS) */}
         {assignedDuties.length > 0 && (
-          <div id="volunteer-duty" className="bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 rounded-3xl p-6 sm:p-8 text-white shadow-xl shadow-orange-500/20 relative overflow-hidden scroll-mt-28">
+          <div className="bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 rounded-3xl p-6 sm:p-8 text-white shadow-xl shadow-orange-500/20 relative overflow-hidden">
             <div className="absolute top-0 right-0 w-80 h-80 bg-white/10 rounded-full blur-2xl pointer-events-none -mr-20 -mt-20"></div>
             <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <div className="space-y-2">
@@ -934,7 +878,7 @@ const StudentDashboard = () => {
         )}
 
         {/* 2. DIGITAL WALLET & MEMBERSHIP CARDS */}
-        <div id="memberships" className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-sm space-y-8 scroll-mt-28">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-sm space-y-8">
           {(() => {
             const approvedMemberships = (memberships || []).filter(m => m.status === 'active' && m.is_active);
             const pendingMemberships = (memberships || []).filter(m => m.status === 'pending');
@@ -1015,7 +959,7 @@ const StudentDashboard = () => {
         </div>
 
         {/* 3. EVENT QR TICKETS & BOARDING PASSES (COMPLETE WITH ALL USER & EVENT DETAILS + DOWNLOAD) */}
-        <div id="tickets" className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6 scroll-mt-28">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
@@ -1215,7 +1159,7 @@ const StudentDashboard = () => {
         </div>
 
         {/* 4. RECRUITMENT APPLICATIONS TIMELINE */}
-        <div id="recruitments" className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-sm space-y-4 scroll-mt-28">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
               <Clock className="text-violet-600" /> My Recruitment Applications ({applications.length})
@@ -1268,7 +1212,7 @@ const StudentDashboard = () => {
         </div>
 
         {/* 5. EARNED VERIFIED CERTIFICATES */}
-        <div id="certificates" className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-sm space-y-4 scroll-mt-28">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
               <Award className="text-amber-500" /> Issued Certificates ({certificates.length})
@@ -1312,7 +1256,7 @@ const StudentDashboard = () => {
         </div>
 
         {/* 6. VOLUNTEER SERVICE & CIVIC ENGAGEMENT */}
-        <div id="volunteer-hours" className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6 scroll-mt-28">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">

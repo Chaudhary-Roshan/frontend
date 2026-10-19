@@ -28,7 +28,6 @@ import EventRegistrationsRoster from '../../components/events/EventRegistrations
 import { sortSocietyMembers, ROLE_TIER_CATEGORIES, getDynamicRoleRank } from '../../utils/hierarchy';
 import EditAdvertisementModal from '../../components/modals/EditAdvertisementModal';
 import { IUBLogoEmblem, getSocietyCertificateTheme } from '../../utils/societyCertificateThemes';
-import PortalSectionNav from '../../components/common/PortalSectionNav';
 
 const InstagramIcon = () => (
   <svg className="w-3.5 h-3.5 text-pink-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1282,67 +1281,6 @@ const PresidentDashboard = () => {
   const activeCabinet = sortSocietyMembers(cabinet.filter(c => c.is_active));
   const inactiveCabinet = sortSocietyMembers(cabinet.filter(c => !c.is_active));
 
-  const pendingProposalsCount = proposals.filter(p => ['draft', 'submitted', 'under_review'].includes(p.status)).length;
-
-  const presidentSections = [
-    {
-      id: 'overview',
-      label: 'Club Overview',
-      icon: Shield,
-      badge: society ? 'Active' : 'Unassigned',
-      badgeColor: society ? 'emerald' : 'amber'
-    },
-    {
-      id: 'governance',
-      label: 'Governance & Cabinet',
-      icon: Building,
-      badge: `${activeCabinet.length} Execs`,
-      badgeColor: 'indigo'
-    },
-    {
-      id: 'proposals',
-      label: 'Event Proposals',
-      icon: FileText,
-      badge: pendingProposalsCount > 0 ? `${pendingProposalsCount} In Review` : `${proposals.length}`,
-      badgeColor: pendingProposalsCount > 0 ? 'amber' : 'slate'
-    },
-    {
-      id: 'live-events',
-      label: 'Live Marketing',
-      icon: Sparkles,
-      badge: `${societyEvents.length} Events`,
-      badgeColor: 'purple'
-    },
-    {
-      id: 'finance-ledger',
-      label: 'Budget & Ledger',
-      icon: DollarSign,
-      badge: `${filteredTicketSales.length + manualBudgets.length + filteredSponsorships.length} Entries`,
-      badgeColor: 'emerald'
-    },
-    {
-      id: 'media-gallery',
-      label: 'Photo Showcase',
-      icon: Folder,
-      badge: `${galleries.length} Media`,
-      badgeColor: 'rose'
-    },
-    {
-      id: 'gate-volunteers',
-      label: 'Gate & Volunteers',
-      icon: QrCode,
-      badge: `${staffAssignments.length + volunteerHours.length} Staff`,
-      badgeColor: 'amber'
-    },
-    {
-      id: 'certificates',
-      label: 'Certificates Studio',
-      icon: Award,
-      badge: `${certificateTemplates.length} Templates`,
-      badgeColor: 'blue'
-    }
-  ];
-
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
@@ -1372,7 +1310,7 @@ const PresidentDashboard = () => {
         )}
 
         {/* 1. HIGH-IMPACT CLUB BRANDING HEADER BANNER - 50/50 Overlapping Layout */}
-        <div id="overview" className="w-full scroll-mt-28">
+        <div className="w-full">
           {/* 1. Cover Image Section */}
           <div className="w-full aspect-[2/1] sm:aspect-[21/9] md:aspect-[3/1] min-h-[160px] relative rounded-t-2xl sm:rounded-t-3xl overflow-hidden">
             <MediaImage
@@ -1521,11 +1459,8 @@ const PresidentDashboard = () => {
 
         {society && (
           <>
-            {/* STICKY QUICK-NAVIGATION JUMP BAR WITH LIVE SECTION BADGES */}
-            <PortalSectionNav sections={presidentSections} />
-
             {/* 2. CLUB MISSION, VISION & CABINET ROSTER CARD */}
-            <div id="governance" className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6 scroll-mt-28">
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-slate-100">
                 <div>
                   <div className="flex items-center gap-2">
@@ -1605,7 +1540,7 @@ const PresidentDashboard = () => {
             </div>
 
             {/* 3. EVENT PROPOSALS & STATUTORY WORKFLOW PIPELINE */}
-            <div id="proposals" className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6 scroll-mt-28">
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
                 <div>
                   <div className="flex items-center gap-2">
@@ -1775,7 +1710,7 @@ const PresidentDashboard = () => {
             </div>
 
             {/* 3.1 APPROVED EVENTS & MARKETING STATUS TRACKER (TWO-STAGE PUBLISHING) */}
-            <div id="live-events" className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6 scroll-mt-28">
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
                 <div>
                   <div className="flex items-center gap-2">
@@ -1928,7 +1863,7 @@ const PresidentDashboard = () => {
             </div>
 
             {/* 4. REFINED EVENT-WISE BUDGET & SPONSORSHIP LEDGER */}
-            <div id="finance-ledger" className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6 scroll-mt-28">
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
                 <div>
                   <div className="flex items-center gap-2">
@@ -2120,7 +2055,7 @@ const PresidentDashboard = () => {
             </div>
 
             {/* 5. EVENT PHOTO SHOWCASE ORGANIZED BY FOLDERS */}
-            <div id="media-gallery" className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6 scroll-mt-28">
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6 scroll-mt-24">
               {/* Header Bar */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
                 <div>
@@ -2357,7 +2292,7 @@ const PresidentDashboard = () => {
             </div>
 
             {/* 6. EVENT CHECK-IN VOLUNTEER OFFICERS & GATE LANES */}
-            <div id="gate-volunteers" className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6 scroll-mt-28">
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
                 <div>
                   <div className="flex items-center gap-2">
@@ -2562,7 +2497,7 @@ const PresidentDashboard = () => {
             </div>
 
             {/* 7. OFFICIAL CERTIFICATE TEMPLATES & DESIGN STUDIO */}
-            <div id="certificates" className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6 scroll-mt-28">
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
                 <div>
                   <div className="flex items-center gap-2">

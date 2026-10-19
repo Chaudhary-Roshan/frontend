@@ -19,7 +19,6 @@ import EventRegistrationsRoster from '../../components/events/EventRegistrations
 import ExecutiveProfileModal from '../../components/modals/ExecutiveProfileModal';
 import { getMediaUrl } from '../../utils/media';
 import { sortSocietyMembers } from '../../utils/hierarchy';
-import PortalSectionNav from '../../components/common/PortalSectionNav';
 
 const AdvisorDashboard = () => {
   const { user } = useContext(AuthContext);
@@ -629,48 +628,6 @@ const AdvisorDashboard = () => {
     );
   }
 
-  const pendingProposalsCount = pendingEventProposals.length;
-  const pendingPaymentsCount = pendingRegs.length;
-  const pendingCabinetCount = cabinet.filter(c => c.is_active && !c.is_verified).length;
-
-  const advisorSections = [
-    {
-      id: 'overview',
-      label: 'Portal Overview',
-      icon: Users,
-      badge: selectedSocietyId === 'all' ? `${assignedSocieties.length} Societies` : (society?.name || 'Active'),
-      badgeColor: 'indigo'
-    },
-    {
-      id: 'proposals',
-      label: 'Proposals Review',
-      icon: FileText,
-      badge: pendingProposalsCount > 0 ? `${pendingProposalsCount} Action Required` : `${proposals.length}`,
-      badgeColor: pendingProposalsCount > 0 ? 'amber' : 'slate'
-    },
-    {
-      id: 'verifications',
-      label: 'Payments & Endorsements',
-      icon: CreditCard,
-      badge: pendingPaymentsCount > 0 ? `${pendingPaymentsCount} Receipts` : 'Clear',
-      badgeColor: pendingPaymentsCount > 0 ? 'amber' : 'emerald'
-    },
-    {
-      id: 'cabinet',
-      label: 'Cabinet Nominations',
-      icon: ShieldCheck,
-      badge: pendingCabinetCount > 0 ? `${pendingCabinetCount} Pending` : `${cabinet.length} Members`,
-      badgeColor: pendingCabinetCount > 0 ? 'amber' : 'slate'
-    },
-    {
-      id: 'registrations',
-      label: 'Event Registrations Suite',
-      icon: CheckSquare,
-      badge: `${events.length} Events`,
-      badgeColor: 'blue'
-    }
-  ];
-
   return (
     <div className="min-h-screen bg-slate-50 py-10 px-4 sm:px-6 lg:px-8 font-sans">
       <div className="max-w-7xl mx-auto space-y-8">
@@ -683,7 +640,7 @@ const AdvisorDashboard = () => {
         )}
 
         {/* HEADER */}
-        <div id="overview" className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6 scroll-mt-28">
+        <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">
@@ -852,11 +809,8 @@ const AdvisorDashboard = () => {
           </div>
         )}
 
-        {/* STICKY QUICK-NAVIGATION JUMP BAR */}
-        <PortalSectionNav sections={advisorSections} />
-
         {/* 1. STATUTORY EVENT PROPOSALS & PHYSICAL ENDORSEMENT DESK */}
-        <div id="proposals" className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 sm:p-8 space-y-4 scroll-mt-28">
+        <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 sm:p-8 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
@@ -1005,7 +959,7 @@ const AdvisorDashboard = () => {
         </div>
 
         {/* 2. PAYMENT VERIFICATIONS & CERTIFICATE GENERATION */}
-        <div id="verifications" className="grid grid-cols-1 lg:grid-cols-2 gap-8 scroll-mt-28">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           
           {/* Payment Verifications */}
           <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 sm:p-8 space-y-4">
@@ -1185,7 +1139,7 @@ const AdvisorDashboard = () => {
         </div>
 
         {/* 3. PENDING CABINET APPROVALS */}
-        <div id="cabinet" className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 sm:p-8 space-y-4 scroll-mt-28">
+        <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 sm:p-8 space-y-4">
           <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
             <Users className="text-violet-600" /> Pending Cabinet Role Verifications ({cabinet.length})
           </h2>
@@ -1216,7 +1170,7 @@ const AdvisorDashboard = () => {
         </div>
 
         {/* INTEGRATED EVENT REGISTRATIONS & PAYMENT VERIFICATION SUITE */}
-        <div id="registrations" className="mt-8 space-y-8 mb-8 scroll-mt-28">
+        <div className="mt-8 space-y-8 mb-8">
           <EventRegistrationsRoster events={events} />
           <PaymentVerificationDesk events={events} />
           <ManualTicketingHub events={events} onTicketsIssued={fetchData} />
