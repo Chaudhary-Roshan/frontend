@@ -46,6 +46,8 @@ const EventRegistrationsRoster = ({
     return events.find(e => String(e.id) === String(selectedEventId)) || null;
   }, [events, selectedEventId]);
 
+  const isEventConcluded = Boolean(activeEvent?.is_expired || (activeEvent?.date && new Date(activeEvent.date) < new Date()));
+
   const fetchEventData = async (eventId) => {
     if (!eventId) return;
     setLoading(true);
@@ -395,7 +397,12 @@ const EventRegistrationsRoster = ({
             { id: 'verified', label: `Confirmed (${verifiedCount})` },
             { id: 'pending', label: `Pending (${pendingCount})` },
             { id: 'attended', label: `Checked In (${attendedCount})` },
-            { id: 'absent', label: `Absent (${Math.max(0, verifiedCount - attendedCount)})` }
+            { 
+              id: 'absent', 
+              label: isEventConcluded 
+                ? `Absent (${Math.max(0, verifiedCount - attendedCount)})` 
+                : `Awaiting Arrival (${Math.max(0, verifiedCount - attendedCount)})` 
+            }
           ].map(tab => (
             <button
               key={tab.id}
@@ -537,8 +544,16 @@ const EventRegistrationsRoster = ({
                             </p>
                           )}
                         </div>
+                      ) : isEventConcluded ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-lg">
+                          <XCircle size={12} className="text-rose-500" />
+                          <span>Absent (Missed)</span>
+                        </span>
                       ) : (
-                        <span className="text-gray-400 italic text-[11px]">Not Checked In</span>
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg">
+                          <Clock size={12} className="text-amber-500" />
+                          <span>Awaiting Event Check-In</span>
+                        </span>
                       )}
                     </td>
 

@@ -553,9 +553,10 @@ const AttendanceManagement = () => {
   };
 
   const currentEvent = events.find(e => e.id === parseInt(selectedEventId));
+  const isEventConcluded = Boolean(currentEvent?.is_expired || (currentEvent?.date && new Date(currentEvent.date) < new Date()));
   const totalRegistered = registrations.length;
   const presentCount = registrations.filter(r => r.attendance_status).length;
-  const absentCount = totalRegistered - presentCount;
+  const pendingOrAbsentCount = Math.max(0, totalRegistered - presentCount);
   const attendanceRate = totalRegistered > 0 ? Math.round((presentCount / totalRegistered) * 100) : 0;
 
   const filteredRegistrations = registrations.filter(r => {
@@ -684,7 +685,7 @@ const AttendanceManagement = () => {
           {[
             { label: 'Total Registered', count: totalRegistered, color: 'text-slate-900', bg: 'bg-white' },
             { label: 'Checked-In (Present)', count: presentCount, color: 'text-emerald-600', bg: 'bg-white' },
-            { label: 'Absent / Pending', count: absentCount, color: 'text-amber-600', bg: 'bg-white' },
+            { label: isEventConcluded ? 'Absent (Concluded)' : 'Awaiting Check-In', count: pendingOrAbsentCount, color: isEventConcluded ? 'text-rose-600' : 'text-amber-600', bg: 'bg-white' },
             { label: 'Attendance Rate', count: `${attendanceRate}%`, color: 'text-indigo-600', bg: 'bg-white' },
           ].map((stat, i) => (
             <div key={i} className={`p-6 rounded-3xl border border-slate-200 shadow-sm ${stat.bg}`}>
@@ -1096,15 +1097,25 @@ const AttendanceManagement = () => {
                       </td>
                       <td className="py-3.5 px-4">
                         <span className={`inline-flex flex-col gap-0.5 px-3 py-1.5 rounded-xl text-xs font-bold ${
-                          reg.attendance_status ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-slate-100 text-slate-500'
+                          reg.attendance_status 
+                            ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' 
+                            : isEventConcluded 
+                              ? 'bg-rose-50 border border-rose-200 text-rose-700'
+                              : 'bg-amber-50 border border-amber-200 text-amber-800'
                         }`}>
                           <span className="flex items-center gap-1.5">
                             {reg.attendance_status ? (
                               <>
                                 <CheckCircle2 size={13} className="text-emerald-600" /> Present (Verified)
                               </>
+                            ) : isEventConcluded ? (
+                              <>
+                                <X size={13} className="text-rose-500" /> Absent (Missed)
+                              </>
                             ) : (
-                              'Absent'
+                              <>
+                                <Clock size={13} className="text-amber-500" /> Awaiting Check-In
+                              </>
                             )}
                           </span>
                           {reg.attendance_status && (reg.checked_in_at || reg.checked_in_by_name) && (

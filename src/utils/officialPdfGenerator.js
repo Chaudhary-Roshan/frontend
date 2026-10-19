@@ -711,8 +711,8 @@ export async function generateEventAttendancePdf({ event, registrations = [], fi
     const prog = reg.student_program || reg.student?.program || '';
     const deptProg = prog ? `${dept} (${prog})` : dept;
     const ticketId = reg.ticket_number || (reg.id ? `TKT-${reg.id}` : 'PENDING');
-    const payment = reg.payment_status === 'verified' ? 'Verified' : (reg.payment_status === 'held' ? 'Held' : (reg.payment_status === 'pending' ? 'Pending' : reg.payment_status));
-    const attendance = reg.attendance_status ? 'Checked In' : 'Absent';
+    const isEventConcluded = Boolean(event?.is_expired || (event?.date && new Date(event.date) < new Date()));
+    const attendance = reg.attendance_status ? 'Checked In' : (isEventConcluded ? 'Absent' : 'Registered / Upcoming');
 
     return [
       index + 1,

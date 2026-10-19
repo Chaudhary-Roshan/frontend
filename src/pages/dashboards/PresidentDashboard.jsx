@@ -146,6 +146,7 @@ const PresidentDashboard = () => {
 
   // Active Ledger Filter
   const [ledgerEventFilter, setLedgerEventFilter] = useState('all');
+  const [ledgerTypeFilter, setLedgerTypeFilter] = useState('all');
 
   // Certificate Templates & Design Studio
   const [certificateTemplates, setCertificateTemplates] = useState([]);
@@ -1220,24 +1221,57 @@ const PresidentDashboard = () => {
   const societyGalleries = galleries.filter(g => society && g.society === society.id);
   
   // Registrations logic
-  const societyRegistrations = registrations.filter(r => societyEvents.some(se => se.id === r.event));
+  const societyRegistrations = registrations.filter(r => {
+    const rEvtId = Number(r.event?.id || r.event);
+    return societyEvents.some(se => Number(se.id) === rEvtId);
+  });
   const pendingRegistrations = societyRegistrations.filter(r => r.payment_status === 'pending');
 
   // Filtered Budget & Sponsorships (Event-Wise Ledger)
-  const societyBudgets = budgets.filter(b => society && b.society === society.id);
-  const societySponsorships = sponsorships.filter(s => society && s.society === society.id);
+  const getSocId = (s) => (s && typeof s === 'object' ? s.id : s);
+  const currentSocId = society ? Number(society.id) : null;
+  const societyBudgets = budgets.filter(b => currentSocId && Number(getSocId(b.society)) === currentSocId);
+  const societySponsorships = sponsorships.filter(s => currentSocId && Number(getSocId(s.society)) === currentSocId);
 
   const filteredBudgets = ledgerEventFilter === 'all' 
     ? societyBudgets 
-    : societyBudgets.filter(b => b.event === parseInt(ledgerEventFilter));
+    : societyBudgets.filter(b => Number(b.event?.id || b.event) === parseInt(ledgerEventFilter));
 
   const filteredSponsorships = ledgerEventFilter === 'all'
     ? societySponsorships
-    : societySponsorships.filter(s => s.event === parseInt(ledgerEventFilter));
+    : societySponsorships.filter(s => Number(s.event?.id || s.event) === parseInt(ledgerEventFilter));
 
-  // Ledger Computations
-  const totalBudgetExpense = filteredBudgets.filter(b => b.is_expense).reduce((acc, b) => acc + parseFloat(b.amount || 0), 0);
-  const totalBudgetIncome = filteredBudgets.filter(b => !b.is_expense).reduce((acc, b) => acc + parseFloat(b.amount || 0), 0);
+  // Verified & Issued Ticket Sales for the Society
+  const verifiedRegistrations = societyRegistrations.filter(r => 
+    r.payment_status === 'verified' || r.ticket_status === 'issued'
+  );
+
+  const getTicketAmount = (reg) => {
+    if (reg.paid_amount && parseFloat(reg.paid_amount) > 0) return parseFloat(reg.paid_amount);
+    if (reg.amount && parseFloat(reg.amount) > 0) return parseFloat(reg.amount);
+    if (reg.event_price && parseFloat(reg.event_price) > 0) return parseFloat(reg.event_price);
+    const ev = societyEvents.find(e => Number(e.id) === Number(reg.event?.id || reg.event));
+    if (ev?.entry_fee && parseFloat(ev.entry_fee) > 0) return parseFloat(ev.entry_fee);
+    if (ev?.price && parseFloat(ev.price) > 0) return parseFloat(ev.price);
+    return 0;
+  };
+
+  const filteredTicketSales = verifiedRegistrations.filter(r => {
+    if (ledgerEventFilter === 'all') return true;
+    return Number(r.event?.id || r.event) === parseInt(ledgerEventFilter);
+  });
+
+  // Deduplicate manual budgets that might already mirror an automatic ticket sale entry
+  const manualBudgets = filteredBudgets.filter(b => {
+    if (b.category === 'Ticket Revenue Inflow') return false;
+    if (b.receipt_doc && filteredTicketSales.some(t => t.ticket_number === b.receipt_doc)) return false;
+    return true;
+  });
+
+  const totalTicketRevenue = filteredTicketSales.reduce((acc, r) => acc + getTicketAmount(r), 0);
+  const totalBudgetExpense = manualBudgets.filter(b => b.is_expense).reduce((acc, b) => acc + parseFloat(b.amount || 0), 0);
+  const totalManualIncome = manualBudgets.filter(b => !b.is_expense).reduce((acc, b) => acc + parseFloat(b.amount || 0), 0);
+  const totalBudgetIncome = totalManualIncome + totalTicketRevenue;
   const totalSponsorshipsAmount = filteredSponsorships.reduce((acc, s) => acc + parseFloat(s.amount || 0), 0);
   const netLedgerBalance = totalBudgetIncome + totalSponsorshipsAmount - totalBudgetExpense;
 
@@ -1870,25 +1904,58 @@ const PresidentDashboard = () => {
               </div>
 
               {/* LEDGER KPI TILES */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
                 <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Inflows (Income & Grants)</span>
-                  <p className="text-xl font-black text-emerald-600 mt-1">PKR {totalBudgetIncome.toFixed(2)}</p>
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Ticket Sales Revenue</span>
+                  <p className="text-xl font-black text-blue-600 mt-1">PKR {totalTicketRevenue.toFixed(2)}</p>
+                  <span className="text-[10px] font-semibold text-slate-400">{filteredTicketSales.length} Confirmed Passes</span>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Inflows (Grants & Income)</span>
+                  <p className="text-xl font-black text-emerald-600 mt-1">PKR {totalManualIncome.toFixed(2)}</p>
+                  <span className="text-[10px] font-semibold text-slate-400">{manualBudgets.filter(b => !b.is_expense).length} Inflow Entries</span>
                 </div>
                 <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
                   <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Outflows (Expenses)</span>
                   <p className="text-xl font-black text-rose-600 mt-1">PKR {totalBudgetExpense.toFixed(2)}</p>
+                  <span className="text-[10px] font-semibold text-slate-400">{manualBudgets.filter(b => b.is_expense).length} Outflow Entries</span>
                 </div>
                 <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
                   <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Sponsorships Raised</span>
                   <p className="text-xl font-black text-amber-600 mt-1">PKR {totalSponsorshipsAmount.toFixed(2)}</p>
+                  <span className="text-[10px] font-semibold text-slate-400">{filteredSponsorships.length} Sponsor Grants</span>
                 </div>
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 col-span-2 lg:col-span-1">
                   <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Net Filtered Balance</span>
                   <p className={`text-xl font-black mt-1 ${netLedgerBalance >= 0 ? 'text-indigo-600' : 'text-rose-600'}`}>
                     PKR {netLedgerBalance.toFixed(2)}
                   </p>
+                  <span className="text-[10px] font-semibold text-slate-400">Total Treasury Standing</span>
                 </div>
+              </div>
+
+              {/* LEDGER TRANSACTION CATEGORY FILTER TABS */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100">
+                {[
+                  { id: 'all', label: `All Transactions (${filteredTicketSales.length + manualBudgets.length + filteredSponsorships.length})` },
+                  { id: 'tickets', label: `Ticket Sales (${filteredTicketSales.length})` },
+                  { id: 'expenses', label: `Outflows / Expenses (${manualBudgets.filter(b => b.is_expense).length})` },
+                  { id: 'income', label: `General Inflows (${manualBudgets.filter(b => !b.is_expense).length})` },
+                  { id: 'sponsors', label: `Sponsorships (${filteredSponsorships.length})` },
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setLedgerTypeFilter(tab.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      ledgerTypeFilter === tab.id
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
 
               {/* ITEMIZED TRANSACTIONS TABLE */}
@@ -1905,26 +1972,59 @@ const PresidentDashboard = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                    {filteredBudgets.map((b) => (
-                      <tr key={`b-${b.id}`} className="hover:bg-slate-50/60 transition">
-                        <td className="py-3">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                            b.is_expense ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          }`}>
-                            {b.is_expense ? 'Expense' : 'Income'}
-                          </span>
-                        </td>
-                        <td className="py-3 font-bold text-slate-900">{b.title}</td>
-                        <td className="py-3 text-slate-500">{b.event_title || 'General Society Fund'}</td>
-                        <td className="py-3">{b.category || 'General'}</td>
-                        <td className="py-3 text-slate-500">{b.payment_method || 'Bank Transfer'}</td>
-                        <td className={`py-3 text-right font-black ${b.is_expense ? 'text-rose-600' : 'text-emerald-600'}`}>
-                          {b.is_expense ? `-PKR ${parseFloat(b.amount).toLocaleString()}` : `+PKR ${parseFloat(b.amount).toLocaleString()}`}
-                        </td>
-                      </tr>
-                    ))}
+                    {/* 1. TICKET SALES REVENUE ROWS */}
+                    {(ledgerTypeFilter === 'all' || ledgerTypeFilter === 'tickets' || ledgerTypeFilter === 'income') && filteredTicketSales.map((r) => {
+                      const tAmount = getTicketAmount(r);
+                      const evTitle = r.event_title || societyEvents.find(e => Number(e.id) === Number(r.event?.id || r.event))?.title || 'Society Event';
+                      return (
+                        <tr key={`tkt-${r.id}`} className="hover:bg-blue-50/40 transition bg-blue-50/15">
+                          <td className="py-3">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-100 text-blue-800 border border-blue-200">
+                              Ticket Sale
+                            </span>
+                          </td>
+                          <td className="py-3">
+                            <div className="font-bold text-slate-900">{r.student_name || r.student_username || 'Student Registration'}</div>
+                            <div className="text-[10px] font-mono text-slate-400">
+                              {r.ticket_number || `Ticket ID: #${r.id}`} {r.student_roll_number ? `• Roll: ${r.student_roll_number}` : ''}
+                            </div>
+                          </td>
+                          <td className="py-3 text-slate-600 font-semibold">{evTitle}</td>
+                          <td className="py-3 text-slate-600">Event Admission Pass</td>
+                          <td className="py-3 text-slate-500 font-medium">
+                            {r.transaction_id ? `TxID: ${r.transaction_id.slice(-8)}` : (r.receipt_file ? 'Bank Slip / Receipt' : 'Verified Gateway')}
+                          </td>
+                          <td className="py-3 text-right font-black text-emerald-600">
+                            +PKR {tAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                      );
+                    })}
 
-                    {filteredSponsorships.map((s) => (
+                    {/* 2. MANUAL BUDGET (EXPENSES & INFLOWS) ROWS */}
+                    {(ledgerTypeFilter === 'all' || ledgerTypeFilter === 'expenses' || ledgerTypeFilter === 'income') && manualBudgets
+                      .filter(b => ledgerTypeFilter === 'all' || (ledgerTypeFilter === 'expenses' ? b.is_expense : !b.is_expense))
+                      .map((b) => (
+                        <tr key={`b-${b.id}`} className="hover:bg-slate-50/60 transition">
+                          <td className="py-3">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                              b.is_expense ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            }`}>
+                              {b.is_expense ? 'Expense' : 'Income'}
+                            </span>
+                          </td>
+                          <td className="py-3 font-bold text-slate-900">{b.title}</td>
+                          <td className="py-3 text-slate-500">{b.event_title || 'General Society Fund'}</td>
+                          <td className="py-3">{b.category || 'General'}</td>
+                          <td className="py-3 text-slate-500">{b.payment_method || 'Bank Transfer'}</td>
+                          <td className={`py-3 text-right font-black ${b.is_expense ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            {b.is_expense ? `-PKR ${parseFloat(b.amount).toLocaleString()}` : `+PKR ${parseFloat(b.amount).toLocaleString()}`}
+                          </td>
+                        </tr>
+                      ))}
+
+                    {/* 3. CORPORATE SPONSORSHIPS ROWS */}
+                    {(ledgerTypeFilter === 'all' || ledgerTypeFilter === 'sponsors') && filteredSponsorships.map((s) => (
                       <tr key={`s-${s.id}`} className="hover:bg-slate-50/60 transition bg-amber-50/30">
                         <td className="py-3">
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200">
@@ -1941,10 +2041,11 @@ const PresidentDashboard = () => {
                       </tr>
                     ))}
 
-                    {filteredBudgets.length === 0 && filteredSponsorships.length === 0 && (
+                    {/* 4. EMPTY STATE */}
+                    {filteredTicketSales.length === 0 && manualBudgets.length === 0 && filteredSponsorships.length === 0 && (
                       <tr>
                         <td colSpan={6} className="py-8 text-center text-slate-400 font-medium">
-                          No transactions recorded for this filter. Click "Add Transaction" or "Add Sponsor".
+                          No transactions or ticket sales recorded for this filter. Click "Add Transaction" or "Add Sponsor".
                         </td>
                       </tr>
                     )}
@@ -4097,12 +4198,12 @@ const PresidentDashboard = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Amount ($)</label>
+                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Amount (PKR)</label>
                   <input
                     type="number"
                     step="0.01"
                     required
-                    placeholder="e.g. 150.00"
+                    placeholder="e.g. 15000.00"
                     value={budgetForm.amount}
                     onChange={e => setBudgetForm({ ...budgetForm, amount: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
@@ -4233,12 +4334,12 @@ const PresidentDashboard = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Grant Amount ($)</label>
+                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Grant Amount (PKR)</label>
                   <input
                     type="number"
                     step="0.01"
                     required
-                    placeholder="e.g. 500.00"
+                    placeholder="e.g. 50000.00"
                     value={sponsorForm.amount}
                     onChange={e => setSponsorForm({ ...sponsorForm, amount: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
