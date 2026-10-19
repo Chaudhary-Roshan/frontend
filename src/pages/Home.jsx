@@ -49,19 +49,45 @@ const Home = () => {
     fetchHubData();
 
     const handleSync = () => {
-      fetchHubData();
+      fetchHubData(true);
+    };
+
+    const handleEventUpdated = (e) => {
+      const updated = e?.detail;
+      if (updated && updated.id) {
+        setEvents(prev => prev.map(ev => String(ev.id) === String(updated.id) ? { ...ev, ...updated } : ev));
+        try {
+          const cached = sessionStorage.getItem('dsms_cached_events');
+          if (cached) {
+            const list = JSON.parse(cached);
+            const nextList = list.map(ev => String(ev.id) === String(updated.id) ? { ...ev, ...updated } : ev);
+            sessionStorage.setItem('dsms_cached_events', JSON.stringify(nextList));
+          }
+        } catch (err) {}
+      }
+      fetchHubData(true);
+    };
+
+    const handleStorage = (e) => {
+      if (!e.key || e.key.includes('sync') || e.key.includes('event')) {
+        fetchHubData(true);
+      }
     };
 
     window.addEventListener('dsms:data_synced', handleSync);
     window.addEventListener('dsms:society_updated', handleSync);
+    window.addEventListener('dsms:event_updated', handleEventUpdated);
+    window.addEventListener('storage', handleStorage);
     return () => {
       window.removeEventListener('dsms:data_synced', handleSync);
       window.removeEventListener('dsms:society_updated', handleSync);
+      window.removeEventListener('dsms:event_updated', handleEventUpdated);
+      window.removeEventListener('storage', handleStorage);
     };
   }, [user]);
 
-  const fetchHubData = async () => {
-    if (isFetchingHubRef.current) return;
+  const fetchHubData = async (bypassLock = false) => {
+    if (isFetchingHubRef.current && !bypassLock) return;
     isFetchingHubRef.current = true;
     try {
       const requests = [

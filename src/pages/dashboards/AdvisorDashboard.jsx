@@ -146,8 +146,12 @@ const AdvisorDashboard = () => {
     };
 
     window.addEventListener('dsms:data_synced', handleSync);
+    window.addEventListener('dsms:event_updated', handleSync);
+    window.addEventListener('storage', handleSync);
     return () => {
       window.removeEventListener('dsms:data_synced', handleSync);
+      window.removeEventListener('dsms:event_updated', handleSync);
+      window.removeEventListener('storage', handleSync);
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }

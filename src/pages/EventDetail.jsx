@@ -42,8 +42,56 @@ export default function EventDetail() {
   const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
   const [paidSubmitted, setPaidSubmitted] = useState(false);
 
+  const normalizeEvent = (evData) => {
+    if (!evData) return null;
+    return {
+      ...evData,
+      poster_image_url: evData.poster_image_url || evData.image || '/default-placeholder.jpg',
+      entry_fee: evData.entry_fee ?? (evData.is_paid ? (evData.discount_price && Number(evData.discount_price) > 0 ? parseFloat(evData.discount_price) : parseFloat(evData.price)) : 0),
+      date_time: evData.date_time || (evData.date ? new Date(evData.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'TBD'),
+      venue: (typeof evData.venue === 'object' && evData.venue?.name) ? evData.venue.name : (evData.venue_name || (typeof evData.venue === 'string' ? evData.venue : 'Campus Main Auditorium')),
+      speakers: Array.isArray(evData.speakers) && evData.speakers.length > 0
+        ? evData.speakers
+        : (evData.chief_guest ? [evData.chief_guest] : ['Distinguished Keynote Speakers']),
+      detailed_description: evData.detailed_description || evData.description || 'No detailed description provided for this event.',
+      gallery_images: Array.isArray(evData.gallery_images) ? evData.gallery_images : []
+    };
+  };
+
   useEffect(() => {
     fetchEventDetails();
+
+    const handleSync = (e) => {
+      const targetId = e?.detail?.id || e?.detail?.event?.id;
+      if (targetId && String(targetId) !== String(id)) return;
+      fetchEventDetails(true);
+    };
+
+    const handleEventUpdated = (e) => {
+      const updated = e?.detail;
+      if (updated && String(updated.id) === String(id)) {
+        const norm = normalizeEvent(updated);
+        setEvent(norm);
+        setPaidAmount(String(norm.entry_fee || updated.price || ''));
+      }
+      fetchEventDetails(true);
+    };
+
+    const handleStorage = (e) => {
+      if (!e.key || e.key.includes('sync') || e.key.includes('event')) {
+        fetchEventDetails(true);
+      }
+    };
+
+    window.addEventListener('dsms:data_synced', handleSync);
+    window.addEventListener('dsms:event_updated', handleEventUpdated);
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      window.removeEventListener('dsms:data_synced', handleSync);
+      window.removeEventListener('dsms:event_updated', handleEventUpdated);
+      window.removeEventListener('storage', handleStorage);
+    };
   }, [id, user]);
 
   // Lightbox escape key and scroll lock
@@ -63,33 +111,21 @@ export default function EventDetail() {
     };
   }, [lightboxImage]);
 
-  const fetchEventDetails = async () => {
+  const fetchEventDetails = async (isBackground = false) => {
     try {
-      setLoading(true);
+      if (!isBackground) setLoading(true);
       const [evRes, regRes] = await Promise.allSettled([
-        api.get(`events/${id}/`),
+        api.get(`events/${id}/`, { headers: { 'Cache-Control': 'no-cache' } }),
         user ? api.get('registrations/') : Promise.resolve({ data: [] })
       ]);
 
       if (evRes.status === 'fulfilled') {
         const evData = evRes.value.data;
-        // Normalize fields for layout
-        const normalized = {
-          ...evData,
-          poster_image_url: evData.poster_image_url || evData.image || '/default-placeholder.jpg',
-          entry_fee: evData.entry_fee ?? (evData.is_paid ? (evData.discount_price && Number(evData.discount_price) > 0 ? parseFloat(evData.discount_price) : parseFloat(evData.price)) : 0),
-          date_time: evData.date_time || (evData.date ? new Date(evData.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'TBD'),
-          venue: evData.venue?.name || evData.venue_name || evData.venue || 'Campus Main Auditorium',
-          speakers: Array.isArray(evData.speakers) && evData.speakers.length > 0
-            ? evData.speakers
-            : (evData.chief_guest ? [evData.chief_guest] : ['Distinguished Keynote Speakers']),
-          detailed_description: evData.detailed_description || evData.description || 'No detailed description provided for this event.',
-          gallery_images: Array.isArray(evData.gallery_images) ? evData.gallery_images : []
-        };
+        const normalized = normalizeEvent(evData);
         setEvent(normalized);
         setPaidAmount(String(normalized.entry_fee || evData.price || ''));
       } else {
-        setErrorMsg("Failed to load event details. The event may not exist or is pending review.");
+        if (!isBackground) setErrorMsg("Failed to load event details. The event may not exist or is pending review.");
       }
 
       if (regRes.status === 'fulfilled') {
@@ -100,9 +136,9 @@ export default function EventDetail() {
       }
     } catch (err) {
       console.error(err);
-      setErrorMsg("Error loading event.");
+      if (!isBackground) setErrorMsg("Error loading event.");
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   };
 
@@ -945,8 +981,10 @@ export default function EventDetail() {
           event={event}
           onClose={() => setShowEditModal(false)}
           onSaved={(updatedEvent) => {
-            setEvent(prev => ({ ...prev, ...updatedEvent }));
-            fetchEventDetails();
+            const norm = normalizeEvent(updatedEvent);
+            setEvent(norm);
+            setPaidAmount(String(norm.entry_fee || updatedEvent.price || ''));
+            fetchEventDetails(true);
           }}
         />
       )}

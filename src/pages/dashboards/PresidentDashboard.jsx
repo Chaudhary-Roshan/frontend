@@ -462,12 +462,24 @@ const PresidentDashboard = () => {
       fetchLockedDates();
     };
 
+    const handleEventUpdated = (e) => {
+      const updated = e?.detail;
+      if (updated && updated.id) {
+        setEvents(prev => prev.map(ev => String(ev.id) === String(updated.id) ? { ...ev, ...updated } : ev));
+        setProposals(prev => prev.map(p => (String(p.event) === String(updated.id) || p.proposal_no === updated.proposal_doc_number) ? { ...p, event_title: updated.title, venue: updated.venue_name || updated.venue, event_image: updated.image || updated.poster_image_url } : p));
+      }
+      fetchPresidentData();
+      fetchLockedDates();
+    };
+
     window.addEventListener('dsms:society_updated', handleSync);
     window.addEventListener('dsms:data_synced', handleSync);
+    window.addEventListener('dsms:event_updated', handleEventUpdated);
     window.addEventListener('storage', handleSync);
     return () => {
       window.removeEventListener('dsms:society_updated', handleSync);
       window.removeEventListener('dsms:data_synced', handleSync);
+      window.removeEventListener('dsms:event_updated', handleEventUpdated);
       window.removeEventListener('storage', handleSync);
     };
   }, []);
@@ -4893,7 +4905,8 @@ const PresidentDashboard = () => {
             setAdvertiseTargetEvent(null);
           }}
           onSaved={(updatedEvent) => {
-            setEvents(prev => prev.map(ev => ev.id === updatedEvent.id ? { ...ev, ...updatedEvent } : ev));
+            setEvents(prev => prev.map(ev => String(ev.id) === String(updatedEvent.id) ? { ...ev, ...updatedEvent } : ev));
+            setProposals(prev => prev.map(p => (String(p.event) === String(updatedEvent.id) || p.proposal_no === updatedEvent.proposal_doc_number) ? { ...p, event_title: updatedEvent.title, venue: updatedEvent.venue_name || updatedEvent.venue, event_image: updatedEvent.image || updatedEvent.poster_image_url } : p));
             fetchPresidentData();
             showToast(`Advertisement updated for "${updatedEvent.title}"!`);
           }}

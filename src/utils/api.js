@@ -103,12 +103,12 @@ const clearCacheOnMutation = (response) => {
     } catch (e) {}
 
     if (typeof window !== 'undefined') {
-      if (syncTimeout) clearTimeout(syncTimeout);
-      syncTimeout = setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('dsms:data_synced', {
-          detail: { method, url: response.config?.url }
-        }));
-      }, 300);
+      window.dispatchEvent(new CustomEvent('dsms:data_synced', {
+        detail: { method, url: response.config?.url, data: response.data }
+      }));
+      try {
+        localStorage.setItem('dsms:last_sync', Date.now().toString());
+      } catch (e) {}
     }
   }
   return response;

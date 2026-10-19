@@ -4,7 +4,7 @@ import {
   Upload, Trash2, CheckCircle2, AlertCircle, Sparkles, Clock, 
   Users, Eye, QrCode as QrIcon, FileText, GraduationCap, CheckSquare, Square, Shield
 } from 'lucide-react';
-import api from '../../utils/api';
+import api, { invalidateCache } from '../../utils/api';
 import { MediaImage } from '../common/AuthenticatedMedia';
 import { getMediaUrl } from '../../utils/media';
 import AcademicScopeSelector from '../common/AcademicScopeSelector';
@@ -204,6 +204,35 @@ export default function EditAdvertisementModal({
       });
 
       const updated = res.data.event || res.data;
+
+      // 1. Immediately invalidate in-memory request cache
+      try {
+        invalidateCache();
+      } catch (e) {}
+
+      // 2. Clear all cached storage keys across all portals
+      try {
+        sessionStorage.removeItem('dsms_cached_events');
+        sessionStorage.removeItem('dsms_cached_societies');
+        Object.keys(sessionStorage).forEach(k => {
+          if (k.startsWith('dsms_cached_')) sessionStorage.removeItem(k);
+        });
+      } catch (e) {}
+
+      // 3. Dispatch real-time custom events for all listening components
+      window.dispatchEvent(new CustomEvent('dsms:data_synced', {
+        detail: { event: updated, method: 'post', url: `events/${event.id}/edit-advertisement/` }
+      }));
+      window.dispatchEvent(new CustomEvent('dsms:event_updated', {
+        detail: updated
+      }));
+
+      // 4. Broadcast across browser tabs and portals via localStorage storage event
+      try {
+        localStorage.setItem('dsms:last_event_sync', JSON.stringify({ id: updated.id, timestamp: Date.now() }));
+        localStorage.setItem('dsms:last_sync', Date.now().toString());
+      } catch (e) {}
+
       if (onSaved) {
         onSaved(updated);
       }

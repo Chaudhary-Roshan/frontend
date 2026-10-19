@@ -62,23 +62,50 @@ const Events = () => {
     fetchEventsData();
 
     const handleSync = () => {
-      fetchEventsData();
+      fetchEventsData(true);
+    };
+
+    const handleEventUpdated = (e) => {
+      const updated = e?.detail;
+      if (updated && updated.id) {
+        setEvents(prev => prev.map(ev => String(ev.id) === String(updated.id) ? { ...ev, ...updated } : ev));
+        try {
+          const cached = sessionStorage.getItem('dsms_cached_events');
+          if (cached) {
+            const list = JSON.parse(cached);
+            const nextList = list.map(ev => String(ev.id) === String(updated.id) ? { ...ev, ...updated } : ev);
+            sessionStorage.setItem('dsms_cached_events', JSON.stringify(nextList));
+          }
+        } catch (err) {}
+      }
+      fetchEventsData(true);
+    };
+
+    const handleStorage = (e) => {
+      if (!e.key || e.key.includes('sync') || e.key.includes('event')) {
+        fetchEventsData(true);
+      }
     };
 
     window.addEventListener('dsms:data_synced', handleSync);
+    window.addEventListener('dsms:event_updated', handleEventUpdated);
+    window.addEventListener('storage', handleStorage);
+
     return () => {
       window.removeEventListener('dsms:data_synced', handleSync);
+      window.removeEventListener('dsms:event_updated', handleEventUpdated);
+      window.removeEventListener('storage', handleStorage);
     };
   }, []);
 
-  const fetchEventsData = async () => {
-    if (isFetchingEventsRef.current) return;
+  const fetchEventsData = async (bypassLock = false) => {
+    if (isFetchingEventsRef.current && !bypassLock) return;
     isFetchingEventsRef.current = true;
     try {
       const [evRes, socRes, regRes] = await Promise.allSettled([
-        api.get('events/'),
-        api.get('societies/'),
-        user ? api.get('registrations/') : Promise.resolve({ data: [] })
+        api.get('events/', { headers: { 'Cache-Control': 'no-cache' } }),
+        api.get('societies/', { headers: { 'Cache-Control': 'no-cache' } }),
+        user ? api.get('registrations/', { headers: { 'Cache-Control': 'no-cache' } }) : Promise.resolve({ data: [] })
       ]);
 
       if (evRes.status === 'fulfilled') {

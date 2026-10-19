@@ -70,8 +70,14 @@ const Societies = () => {
     };
 
     window.addEventListener('dsms:data_synced', handleSync);
+    window.addEventListener('dsms:society_updated', handleSync);
+    window.addEventListener('dsms:event_updated', handleSync);
+    window.addEventListener('storage', handleSync);
     return () => {
       window.removeEventListener('dsms:data_synced', handleSync);
+      window.removeEventListener('dsms:society_updated', handleSync);
+      window.removeEventListener('dsms:event_updated', handleSync);
+      window.removeEventListener('storage', handleSync);
     };
   }, []);
 
