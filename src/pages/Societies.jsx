@@ -3,6 +3,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../utils/api';
 import { getMediaUrl, handleImageError } from '../utils/media';
+import { formatAdvisorDisplayName, formatPresidentDisplayName } from './Home';
 import { 
   Users, ArrowRight, Search, Filter, ShieldCheck, Sparkles, 
   Award, Calendar, UserCheck, CheckCircle2, ChevronRight,
@@ -349,7 +350,7 @@ const Societies = () => {
                           <Award size={14} className="text-indigo-500" /> President:
                         </span>
                         <span className="font-bold text-slate-800">
-                          {society.president_full_name || society.president_name || 'Assigned by Admin'}
+                          {formatPresidentDisplayName(society)}
                         </span>
                       </div>
 
@@ -358,7 +359,7 @@ const Societies = () => {
                           <GraduationCap size={14} className="text-emerald-500" /> Faculty Advisor:
                         </span>
                         <span className="font-bold text-slate-800">
-                          {society.advisor_full_name || society.advisor_name || 'Faculty Member'}
+                          {formatAdvisorDisplayName(society)}
                         </span>
                       </div>
 

@@ -22,6 +22,40 @@ export const sortSocietiesPriority = (list) => {
   });
 };
 
+export const formatAdvisorDisplayName = (soc) => {
+  const raw = soc?.advisor_full_name || soc?.advisor_name;
+  if (!raw || raw.toLowerCase() === 'assigned' || raw.toLowerCase() === 'none') {
+    return 'Assigned';
+  }
+  let cleaned = raw.trim();
+  // Strip common trailing system/role suffixes like _dice, _advisor, _faculty, _president
+  cleaned = cleaned.replace(/(_dice|_advisor|_faculty|_pres|_president)$/i, '');
+  // Replace underscores and hyphens with spaces
+  cleaned = cleaned.replace(/[_-]/g, ' ');
+  // Split into words, capitalize each
+  const words = cleaned.split(' ').filter(Boolean).map(w => {
+    if (w.includes('.')) return w;
+    return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+  });
+  // Filter out numeric parts if any
+  const nameWords = words.filter(w => isNaN(w));
+  return (nameWords.length > 0 ? nameWords.join(' ') : words.join(' ')) || 'Faculty Advisor';
+};
+
+export const formatPresidentDisplayName = (soc) => {
+  const raw = soc?.president_full_name || soc?.president_name;
+  if (!raw || raw.toLowerCase() === 'assigned by admin' || raw.toLowerCase() === 'none') {
+    return 'Assigned by Admin';
+  }
+  let cleaned = raw.trim().replace(/(_dice|_advisor|_faculty|_pres|_president)$/i, '').replace(/[_-]/g, ' ');
+  const words = cleaned.split(' ').filter(Boolean).map(w => {
+    if (w.includes('.')) return w;
+    return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+  });
+  const nameWords = words.filter(w => isNaN(w));
+  return (nameWords.length > 0 ? nameWords.join(' ') : words.join(' ')) || 'Society President';
+};
+
 const Home = () => {
   const { user, isAuthLoading } = useContext(AuthContext);
   const [events, setEvents] = useState([]);
@@ -757,11 +791,11 @@ const Home = () => {
                     <h3 className="font-bold text-slate-900 text-base line-clamp-1">{soc.name}</h3>
                     <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed flex-1">{soc.description || 'Active university society promoting student activities and workshops.'}</p>
                   </div>
-                  <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between shrink-0">
-                    <span className="text-[11px] font-bold text-slate-400 truncate max-w-[130px]">
-                      Advisor: {soc.advisor_name || 'Assigned'}
+                  <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between gap-2 shrink-0">
+                    <span className="text-[11px] font-semibold text-slate-500 truncate" title={`Advisor: ${formatAdvisorDisplayName(soc)}`}>
+                      Advisor: <span className="font-bold text-slate-800">{formatAdvisorDisplayName(soc)}</span>
                     </span>
-                    <Link to={`/societies/${soc.id}`} className="text-xs font-bold text-indigo-600 hover:underline shrink-0">
+                    <Link to={`/societies/${soc.id}`} className="text-xs font-bold text-indigo-600 hover:text-indigo-800 hover:underline shrink-0">
                       View Profile →
                     </Link>
                   </div>

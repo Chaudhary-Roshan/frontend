@@ -14,6 +14,7 @@ import QRCode from 'react-qr-code';
 import ImageUploader from '../components/common/ImageUploader';
 import { getMediaUrl, handleImageError, DEFAULT_SOCIETY_LOGO } from '../utils/media';
 import { sortSocietyMembers, getDynamicRoleRank } from '../utils/hierarchy';
+import { formatAdvisorDisplayName, formatPresidentDisplayName } from './Home';
 
 const InstagramIcon = ({ size = 16, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -504,8 +505,8 @@ const SocietyDetail = () => {
                 </p>
                 <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-2 text-[11px] text-slate-200 font-semibold">
                   <span className="bg-black/40 px-2 py-0.5 rounded-lg border border-white/10 flex items-center gap-1">📍 Main Campus</span>
-                  <span className="bg-black/40 px-2 py-0.5 rounded-lg border border-white/10 flex items-center gap-1 max-w-full">🏛️ Advisor: <strong className="text-white truncate max-w-[140px] sm:max-w-none">{society.advisor_full_name || society.advisor_name || 'Dr. Alan Turing'}</strong></span>
-                  <span className="bg-black/40 px-2 py-0.5 rounded-lg border border-white/10 flex items-center gap-1 max-w-full">👑 Pres: <strong className="text-white truncate max-w-[140px] sm:max-w-none">{society.president_full_name || society.president_name || 'Alice'}</strong></span>
+                  <span className="bg-black/40 px-2 py-0.5 rounded-lg border border-white/10 flex items-center gap-1 max-w-full">🏛️ Advisor: <strong className="text-white truncate max-w-[140px] sm:max-w-none">{formatAdvisorDisplayName(society)}</strong></span>
+                  <span className="bg-black/40 px-2 py-0.5 rounded-lg border border-white/10 flex items-center gap-1 max-w-full">👑 Pres: <strong className="text-white truncate max-w-[140px] sm:max-w-none">{formatPresidentDisplayName(society)}</strong></span>
                   {society.contact_email && (
                     <span className="bg-black/40 px-2 py-0.5 rounded-lg border border-white/10 flex items-center gap-1 max-w-full truncate">✉️ {society.contact_email}</span>
                   )}
@@ -750,7 +751,7 @@ const SocietyDetail = () => {
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 font-semibold mb-2">
-                    {society.advisor_full_name || society.advisor_name || 'Dr. Alan Turing'}, Department Oversight
+                    {formatAdvisorDisplayName(society)}, Department Oversight
                   </p>
                   <p className="text-xs text-slate-600 leading-relaxed italic">
                     "This society represents the highest caliber of student engagement and innovation on our campus. I encourage all motivated students to participate in our events and apply for cabinet membership."
@@ -828,13 +829,13 @@ const SocietyDetail = () => {
                   {(society.advisor_avatar_url || society.advisor_profile_picture_url) ? (
                     <MediaImage 
                       src={formatAvatarUrl(society.advisor_avatar_url || society.advisor_profile_picture_url)} 
-                      alt={society.advisor_full_name || society.advisor_name || 'Faculty Advisor'} 
+                      alt={formatAdvisorDisplayName(society)} 
                       className="w-full h-full object-cover"
                       onError={(e) => { e.target.style.display = 'none'; }}
                     />
                   ) : (
                     <span className="text-indigo-600 font-black text-2xl uppercase">
-                      {(society.advisor_full_name || society.advisor_name || 'F').charAt(0)}
+                      {formatAdvisorDisplayName(society).charAt(0)}
                     </span>
                   )}
                 </div>
@@ -843,7 +844,7 @@ const SocietyDetail = () => {
                     Faculty Advisor
                   </span>
                   <h4 className="font-black text-slate-900 text-lg mt-1">
-                    {society.advisor_full_name || society.advisor_name || 'Dr. Alan Turing'}
+                    {formatAdvisorDisplayName(society)}
                   </h4>
                   <p className="text-xs text-slate-500">
                     {society.advisor_department ? `${society.advisor_department} • Academic Oversight` : 'Departmental Academic Oversight & Approvals'}
@@ -857,13 +858,13 @@ const SocietyDetail = () => {
                   {(society.president_avatar_url || society.president_profile_picture_url) ? (
                     <MediaImage 
                       src={formatAvatarUrl(society.president_avatar_url || society.president_profile_picture_url)} 
-                      alt={society.president_full_name || society.president_name || 'Society President'} 
+                      alt={formatPresidentDisplayName(society)} 
                       className="w-full h-full object-cover"
                       onError={(e) => { e.target.style.display = 'none'; }}
                     />
                   ) : (
                     <span className="text-purple-600 font-black text-2xl uppercase">
-                      {(society.president_full_name || society.president_name || 'P').charAt(0)}
+                      {formatPresidentDisplayName(society).charAt(0)}
                     </span>
                   )}
                 </div>
@@ -872,7 +873,7 @@ const SocietyDetail = () => {
                     Society President
                   </span>
                   <h4 className="font-black text-slate-900 text-lg mt-1">
-                    {society.president_full_name || society.president_name || 'Alice'}
+                    {formatPresidentDisplayName(society)}
                   </h4>
                   <p className="text-xs text-slate-500">Chief Executive Body Leader & Operations</p>
                 </div>
