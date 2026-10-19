@@ -24,6 +24,7 @@ import ExecutiveProfileModal from '../../components/modals/ExecutiveProfileModal
 import PaymentVerificationDesk from '../../components/ticketing/PaymentVerificationDesk';
 import ManualTicketingHub from '../../components/ticketing/ManualTicketingHub';
 import MembershipConfiguration from '../../components/membership/MembershipConfiguration';
+import EventRegistrationsRoster from '../../components/events/EventRegistrationsRoster';
 import { sortSocietyMembers, ROLE_TIER_CATEGORIES, getDynamicRoleRank } from '../../utils/hierarchy';
 import EditAdvertisementModal from '../../components/modals/EditAdvertisementModal';
 import { IUBLogoEmblem, getSocietyCertificateTheme } from '../../utils/societyCertificateThemes';
@@ -2549,9 +2550,26 @@ const PresidentDashboard = () => {
                 </Link>
               </div>
 
+              <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-6 rounded-2xl border border-indigo-900/40 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4 text-white">
+                <div>
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <BarChart3 className="text-indigo-400" />
+                    Event Registration & Attendance Registry
+                  </h3>
+                  <p className="text-sm text-slate-300 mt-1">Audit attendee lists, export attendance sheets to PDF/Excel, and monitor ticket sale revenues.</p>
+                </div>
+                <Link 
+                  to="/event-records" 
+                  className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-sm transition shadow-lg shadow-indigo-600/30 whitespace-nowrap cursor-pointer"
+                >
+                  Open Full Screen Registry
+                </Link>
+              </div>
+
               <MembershipConfiguration society={society} onUpdate={fetchPresidentData} />
-              <PaymentVerificationDesk events={societyEvents} />
-              <ManualTicketingHub events={societyEvents} onTicketsIssued={fetchPresidentData} />
+              <EventRegistrationsRoster events={events} />
+              <PaymentVerificationDesk events={events} />
+              <ManualTicketingHub events={events} onTicketsIssued={fetchPresidentData} />
             </div>
 
           </>

@@ -15,6 +15,7 @@ import EventProposalDocumentModal from '../../components/modals/EventProposalDoc
 import { generateOfficialProposalPDF } from '../../utils/officialPdfGenerator';
 import PaymentVerificationDesk from '../../components/ticketing/PaymentVerificationDesk';
 import ManualTicketingHub from '../../components/ticketing/ManualTicketingHub';
+import EventRegistrationsRoster from '../../components/events/EventRegistrationsRoster';
 import ExecutiveProfileModal from '../../components/modals/ExecutiveProfileModal';
 import { getMediaUrl } from '../../utils/media';
 import { sortSocietyMembers } from '../../utils/hierarchy';
@@ -1164,8 +1165,9 @@ const AdvisorDashboard = () => {
           )}
         </div>
 
-        {/* INTEGRATED PAYMENT VERIFICATION & TICKETING SUITE */}
+        {/* INTEGRATED EVENT REGISTRATIONS & PAYMENT VERIFICATION SUITE */}
         <div className="mt-8 space-y-8 mb-8">
+          <EventRegistrationsRoster events={events} />
           <PaymentVerificationDesk events={events} />
           <ManualTicketingHub events={events} onTicketsIssued={fetchData} />
         </div>

@@ -42,6 +42,7 @@ const CommunicationTrail = lazy(() => import('./pages/dashboards/CommunicationTr
 const BudgetManagement = lazy(() => import('./pages/dashboards/BudgetManagement'));
 const AttendanceManagement = lazy(() => import('./pages/dashboards/AttendanceManagement'));
 const MembershipRoster = lazy(() => import('./pages/dashboards/MembershipRoster'));
+const EventRegistrationRecords = lazy(() => import('./pages/dashboards/EventRegistrationRecords'));
 
 function App() {
   return (
@@ -122,6 +123,16 @@ function App() {
               <Route path="/attendance" element={
                 <ProtectedRoute allowedRoles={['president', 'faculty', 'admin', 'student']}>
                   <AttendanceManagement />
+                </ProtectedRoute>
+              } />
+              <Route path="/event-records" element={
+                <ProtectedRoute allowedRoles={['president', 'faculty', 'admin', 'student']}>
+                  <EventRegistrationRecords />
+                </ProtectedRoute>
+              } />
+              <Route path="/president/event-records" element={
+                <ProtectedRoute allowedRoles={['president', 'faculty', 'admin']}>
+                  <EventRegistrationRecords />
                 </ProtectedRoute>
               } />
               <Route path="/membership-roster" element={

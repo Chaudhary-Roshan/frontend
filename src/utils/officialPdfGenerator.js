@@ -632,3 +632,176 @@ export function generateOfficialTranscriptPDF(transcriptData, filename) {
   doc.save(safeFilename.endsWith('.pdf') ? safeFilename : `${safeFilename}.pdf`);
   return true;
 }
+
+/**
+ * Generates an official printable Event Registration & Attendance Roster PDF
+ * Designed for event coordinators, check-in gates, faculty advisors, and institutional record keeping.
+ */
+export async function generateEventAttendancePdf({ event, registrations = [], filename = '' }) {
+  if (!event) return false;
+
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const pageWidth = 210;
+  const pageHeight = 297;
+  const margin = 12;
+  const contentWidth = pageWidth - (margin * 2);
+
+  let cursorY = margin + 4;
+
+  // --- 1. INSTITUTIONAL HEADER ---
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(...COLORS.primaryNavy);
+  doc.text('THE ISLAMIA UNIVERSITY OF BAHAWALPUR', pageWidth / 2, cursorY, { align: 'center' });
+
+  cursorY += 5;
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...COLORS.secondaryNavy);
+  doc.text('DIRECTORATE OF STUDENT AFFAIRS & CO-CURRICULAR ACTIVITIES', pageWidth / 2, cursorY, { align: 'center' });
+
+  cursorY += 4.5;
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...COLORS.textMuted);
+  doc.text('Official Event Participant Registry & Attendance Record Sheet', pageWidth / 2, cursorY, { align: 'center' });
+
+  cursorY += 3;
+  doc.setDrawColor(...COLORS.secondaryNavy);
+  doc.setLineWidth(0.8);
+  doc.line(margin, cursorY, pageWidth - margin, cursorY);
+  cursorY += 5;
+
+  // --- 2. EVENT METADATA SUMMARY TABLE ---
+  const eventDateStr = event.date_time || (event.date ? new Date(event.date).toLocaleDateString('en-US', { dateStyle: 'full' }) : 'Scheduled Date');
+  const societyTitle = event.society_name || (event.society?.name) || 'Departmental Student Society';
+  const priceStr = event.is_paid ? `PKR ${event.price || event.ticket_price || 0}` : 'Free Attendance';
+  const totalCount = registrations.length;
+  const verifiedCount = registrations.filter(r => r.payment_status === 'verified').length;
+  const attendedCount = registrations.filter(r => r.attendance_status).length;
+  const turnoutRate = verifiedCount > 0 ? `${Math.round((attendedCount / verifiedCount) * 100)}%` : '0%';
+
+  autoTable(doc, {
+    startY: cursorY,
+    margin: { left: margin, right: margin },
+    theme: 'grid',
+    styles: { fontSize: 8, cellPadding: 2.5, lineColor: COLORS.borderGrey, lineWidth: 0.2 },
+    headStyles: { fillColor: COLORS.primaryNavy, textColor: COLORS.white, fontStyle: 'bold', fontSize: 8.5 },
+    head: [['EVENT SPECIFICATION & SUMMARY AUDIT', 'ORGANIZING SOCIETY & METRICS']],
+    body: [
+      [
+        `Event Title: ${event.title || 'Official University Event'}\nDate & Time: ${eventDateStr}\nVenue: ${event.event_venue || event.venue || 'Campus Auditorium'}\nRegistration Fee: ${priceStr}`,
+        `Society: ${societyTitle}\nCapacity Limit: ${event.capacity || event.expected_attendees || 'Open'}\nTotal Registered: ${totalCount} | Confirmed: ${verifiedCount}\nVenue Attendance: ${attendedCount} (Turnout: ${turnoutRate})`
+      ]
+    ]
+  });
+
+  cursorY = doc.lastAutoTable.finalY + 6;
+
+  // --- 3. ATTENDEES TABLE ---
+  const tableRows = registrations.map((reg, index) => {
+    const studentName = reg.student_name || reg.student?.username || 'Student';
+    const rollNo = reg.student_roll_number || reg.student?.roll_number || 'N/A';
+    const dept = reg.student_department || reg.student?.department || 'General';
+    const prog = reg.student_program || reg.student?.program || '';
+    const deptProg = prog ? `${dept} (${prog})` : dept;
+    const ticketId = reg.ticket_number || (reg.id ? `TKT-${reg.id}` : 'PENDING');
+    const payment = reg.payment_status === 'verified' ? 'Verified' : (reg.payment_status === 'held' ? 'Held' : (reg.payment_status === 'pending' ? 'Pending' : reg.payment_status));
+    const attendance = reg.attendance_status ? 'Checked In' : 'Absent';
+
+    return [
+      index + 1,
+      rollNo,
+      studentName,
+      deptProg,
+      ticketId,
+      payment,
+      attendance,
+      '' // Blank column for physical checkmark / signature
+    ];
+  });
+
+  autoTable(doc, {
+    startY: cursorY,
+    margin: { left: margin, right: margin },
+    theme: 'striped',
+    styles: { fontSize: 7.5, cellPadding: 2, lineColor: COLORS.borderGrey, lineWidth: 0.15 },
+    headStyles: { fillColor: COLORS.secondaryNavy, textColor: COLORS.white, fontStyle: 'bold', fontSize: 8 },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    columnStyles: {
+      0: { halign: 'center', cellWidth: 10 },
+      1: { cellWidth: 28, fontStyle: 'bold' },
+      2: { cellWidth: 38 },
+      3: { cellWidth: 42 },
+      4: { cellWidth: 26, fontStyle: 'bold' },
+      5: { halign: 'center', cellWidth: 16 },
+      6: { halign: 'center', cellWidth: 18 },
+      7: { cellWidth: 8 }
+    },
+    head: [['#', 'Roll Number', 'Student Name', 'Department / Program', 'Ticket ID', 'Payment', 'Status', 'Sig']],
+    body: tableRows.length > 0 ? tableRows : [['-', '-', 'No students registered for this event yet.', '-', '-', '-', '-', '']]
+  });
+
+  cursorY = doc.lastAutoTable.finalY + 6;
+
+  // Check if signature block fits on page
+  if (cursorY > pageHeight - 45) {
+    doc.addPage();
+    cursorY = margin + 10;
+  }
+
+  // --- 4. SIGNATURE AND ATTESTATION BLOCK ---
+  autoTable(doc, {
+    startY: cursorY,
+    margin: { left: margin, right: margin },
+    theme: 'grid',
+    styles: { fontSize: 8, cellPadding: 3, lineColor: COLORS.borderGrey, lineWidth: 0.3 },
+    headStyles: { fillColor: COLORS.slateLight, textColor: COLORS.primaryNavy, fontStyle: 'bold', fontSize: 8, halign: 'center' },
+    head: [['1. SOCIETY PRESIDENT ATTESTATION', '2. GATE CONTROLLER / VOLUNTEER', '3. FACULTY ADVISOR ENDORSEMENT']],
+    columnStyles: {
+      0: { width: contentWidth / 3 },
+      1: { width: contentWidth / 3 },
+      2: { width: contentWidth / 3 }
+    },
+    body: [
+      [
+        {
+          content: 'I certify that this registration roster accurately reflects student signups.\n\n\n___________________________\nSociety President Signature\nDate: _____________________',
+          styles: { minCellHeight: 24 }
+        },
+        {
+          content: 'Confirmed entry and gate barcode scanning records authentic.\n\n\n___________________________\nGate Incharge / Volunteer\nDate: _____________________',
+          styles: { minCellHeight: 24 }
+        },
+        {
+          content: 'Reviewed and countersigned for official co-curricular audit file.\n\n\n___________________________\nFaculty Advisor Signature & Stamp\nDate: _____________________',
+          styles: { minCellHeight: 24 }
+        }
+      ]
+    ]
+  });
+
+  // Borders on all pages
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    drawPageBorder(doc, pageWidth, pageHeight, margin - 4);
+  }
+
+  // Add Footers
+  addDocumentFooter(
+    doc,
+    `Event: ${event.title || 'Event Roster'} • Official Directorate Roster • The Islamia University of Bahawalpur`,
+    totalPages
+  );
+
+  const safeName = filename || `Event_Roster_${(event.title || 'event').replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`;
+  doc.save(safeName.endsWith('.pdf') ? safeName : `${safeName}.pdf`);
+  return true;
+}
+
