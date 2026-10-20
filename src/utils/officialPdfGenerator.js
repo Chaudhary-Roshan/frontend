@@ -713,6 +713,11 @@ export async function generateEventAttendancePdf({ event, registrations = [], fi
     const ticketId = reg.ticket_number || (reg.id ? `TKT-${reg.id}` : 'PENDING');
     const isEventConcluded = Boolean(event?.is_expired || (event?.date && new Date(event.date) < new Date()));
     const attendance = reg.attendance_status ? 'Checked In' : (isEventConcluded ? 'Absent' : 'Registered / Upcoming');
+    const payment = !event?.is_paid
+      ? 'Free'
+      : (reg.payment_status === 'verified'
+          ? 'Verified'
+          : (reg.payment_status ? (reg.payment_status.charAt(0).toUpperCase() + reg.payment_status.slice(1)) : 'Pending'));
 
     return [
       index + 1,
@@ -764,9 +769,9 @@ export async function generateEventAttendancePdf({ event, registrations = [], fi
     headStyles: { fillColor: COLORS.slateLight, textColor: COLORS.primaryNavy, fontStyle: 'bold', fontSize: 8, halign: 'center' },
     head: [['1. SOCIETY PRESIDENT ATTESTATION', '2. GATE CONTROLLER / VOLUNTEER', '3. FACULTY ADVISOR ENDORSEMENT']],
     columnStyles: {
-      0: { width: contentWidth / 3 },
-      1: { width: contentWidth / 3 },
-      2: { width: contentWidth / 3 }
+      0: { cellWidth: contentWidth / 3 },
+      1: { cellWidth: contentWidth / 3 },
+      2: { cellWidth: contentWidth / 3 }
     },
     body: [
       [
