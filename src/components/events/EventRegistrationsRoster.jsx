@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import api from '../../utils/api';
 import { getMediaUrl } from '../../utils/media';
 import { MediaImage, MediaLink } from '../common/AuthenticatedMedia';
@@ -7,7 +8,7 @@ import {
   Users, Ticket, CheckCircle2, XCircle, Clock, Search, Filter,
   Download, FileSpreadsheet, FileText, RefreshCw, Eye, AlertCircle,
   Calendar, MapPin, DollarSign, UserCheck, ShieldCheck, User, Mail,
-  Phone, GraduationCap, X, ChevronRight, BarChart3, ArrowUpDown
+  Phone, GraduationCap, X, ChevronRight, BarChart3, ArrowUpDown, Maximize2
 } from 'lucide-react';
 
 const EventRegistrationsRoster = ({ 
@@ -24,6 +25,8 @@ const EventRegistrationsRoster = ({
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'verified' | 'pending' | 'attended' | 'absent'
   const [selectedAttendee, setSelectedAttendee] = useState(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const location = useLocation();
+  const isFullScreenPage = Boolean(location?.pathname?.includes('event-records'));
 
   // Sync selectedEventId if initialEventId changes
   useEffect(() => {
@@ -220,10 +223,10 @@ const EventRegistrationsRoster = ({
             <span className="p-2 bg-indigo-500/20 text-indigo-300 rounded-xl border border-indigo-400/30">
               <BarChart3 size={20} />
             </span>
-            <h2 className="text-xl font-bold tracking-tight text-white">Event Registration Records & Analytics</h2>
+            <h2 className="text-xl font-bold tracking-tight text-white">Event Registration & Attendance Registry</h2>
           </div>
           <p className="text-xs text-slate-300 mt-1">
-            Real-time participant rosters, ticket sales verification, and check-in audit records.
+            Audit attendee lists, export attendance sheets to PDF/Excel, monitor ticket sale revenues, and check-in audit records.
           </p>
         </div>
 
@@ -279,6 +282,17 @@ const EventRegistrationsRoster = ({
             <FileText size={14} />
             <span>{isExportingPdf ? 'Generating PDF...' : 'Official PDF Roster'}</span>
           </button>
+
+          {!isFullScreenPage && (
+            <Link
+              to={selectedEventId ? `/event-records?event=${selectedEventId}` : '/event-records'}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600/90 hover:bg-indigo-500 text-white text-xs font-bold transition shadow-sm cursor-pointer whitespace-nowrap"
+              title="Open Full Screen Registry"
+            >
+              <Maximize2 size={14} />
+              <span>Full Screen</span>
+            </Link>
+          )}
         </div>
       </div>
 

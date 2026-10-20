@@ -67,7 +67,7 @@ const EventRegistrationRecords = () => {
                 <span className="text-gray-400 text-xs">•</span>
                 <span className="text-xs text-gray-500 font-medium">Official Participant Roster</span>
               </div>
-              <h1 className="text-xl font-black text-gray-900 mt-0.5">Event Registration Records & Analytics</h1>
+              <h1 className="text-xl font-black text-gray-900 mt-0.5">Event Registration & Attendance Registry</h1>
             </div>
           </div>
 
